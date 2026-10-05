@@ -1,0 +1,13 @@
+# downloaded data (regenerate with build_uas_layers.py; contains FAA contact fields)
+out/
+*.gpkg
+*.geojson
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Office temp files
+~$*

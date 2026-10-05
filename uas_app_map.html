@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Lato:400,700,900&display=swap">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --bg:#1d1d20; --panel:#232428; --card:#2b2c31; --line:#36373d; --ink:#eceef3; --muted:#9a9ca6;
+          --blue:#2ea8ff; --green:#1f9d55; --red:#ff3b5c; --amber:#f5b400; --orange:#f5a524; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px/1.45 Lato,system-ui,sans-serif; overflow:hidden; }
+  #map { position:absolute; inset:0; background:#191a1d; }
+  .leaflet-container { font:inherit; background:#191a1d; }
+  .leaflet-control-attribution { background:rgba(29,29,32,.75) !important; color:#80828c !important; font-size:10px; }
+  .leaflet-control-attribution a { color:#9aa4b8 !important; }
+  button { font:inherit; color:inherit; }
+
+  /* floating controls */
+  .fab { width:46px; height:46px; border-radius:50%; border:0; background:#4a4c53; color:#e9eaee; display:grid; place-items:center;
+         cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.45); transition:background .15s; }
+  .fab:hover { background:#5a5c64; }
+  .fab svg { width:21px; height:21px; }
+  #wx { position:absolute; top:12px; left:12px; z-index:500; width:58px; height:58px; border-radius:50%; background:#4a4c53;
+        display:flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.45);
+        font-weight:700; font-size:15px; cursor:default; }
+  #wx svg { width:22px; height:22px; margin-bottom:-2px; }
+  #rightcol { position:absolute; top:12px; right:12px; z-index:500; display:flex; flex-direction:column; gap:14px; }
+  #statusFab { background:var(--green); width:50px; height:50px; }
+  #bottombar { position:absolute; left:12px; bottom:22px; z-index:500; display:flex; gap:10px; align-items:center; }
+  #bottombar .fab { width:44px; height:44px; font-size:22px; }
+  #layersBtn { height:48px; border-radius:24px; padding:0 22px 0 16px; border:0; background:#4a4c53; display:flex; gap:10px;
+               align-items:center; font-size:17px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.45); }
+  #layersBtn:hover { background:#5a5c64; }
+  #layersBtn svg { width:22px; height:22px; }
+  #coords { position:absolute; left:0; bottom:0; z-index:500; font-size:11px; color:#c9cbd2; background:rgba(29,29,32,.8);
+            padding:2px 8px; border-top-right-radius:6px; font-variant-numeric:tabular-nums; }
+
+  /* airports */
+  .apt { width:30px; height:30px; border-radius:50%; background:#1e9bff; border:2px solid #fff; display:grid; place-items:center;
+         box-shadow:0 1px 4px rgba(0,0,0,.5); }
+  .apt svg { width:16px; height:16px; fill:#fff; }
+  .apt.mil { background:#5b7aa6; }
+  .apt-lbl { position:absolute; left:50%; bottom:33px; transform:translateX(-50%); color:#fff; font-weight:700; font-size:14px;
+             white-space:nowrap; text-shadow:0 0 3px #000, 0 0 6px #000; pointer-events:none; }
+  .hp { width:16px; height:16px; border-radius:50%; background:#6b6e78; border:1.5px solid #d6d8de; color:#fff; font-size:9px;
+        font-weight:900; display:grid; place-items:center; }
+  #map.z-lo .apt-lbl { display:none; }
+  #map.z-vlo .apt { transform:scale(.6); }
+
+  /* clicked point */
+  .pinwrap { position:relative; width:0; height:0; }
+  .pill { position:absolute; left:50%; bottom:58px; transform:translateX(-50%); padding:11px 22px; border-radius:6px; color:#fff;
+          font-size:18px; font-weight:700; white-space:nowrap; cursor:pointer; border:1.5px solid rgba(255,255,255,.35);
+          box-shadow:0 3px 10px rgba(0,0,0,.5); }
+  .pin { position:absolute; left:-16px; top:-50px; width:32px; height:44px; }
+  .ring { position:absolute; left:-22px; top:-22px; width:44px; height:44px; border-radius:50%; border:3px solid #f0c419;
+          background:rgba(80,80,80,.45); }
+
+  /* drawers */
+  .drawer { position:absolute; top:0; bottom:0; z-index:700; background:var(--panel); box-shadow:0 0 24px rgba(0,0,0,.55);
+            display:flex; flex-direction:column; transition:transform .22s ease; }
+  #layersDrawer { left:0; width:340px; transform:translateX(-105%); }
+  #layersDrawer.open { transform:none; }
+  #brief { right:0; width:420px; transform:translateX(105%); }
+  #brief.open { transform:none; }
+  .dh { display:flex; align-items:center; justify-content:space-between; padding:16px 18px; border-bottom:1px solid var(--line);
+        font-size:18px; font-weight:700; }
+  .x { background:none; border:0; color:var(--muted); font-size:22px; cursor:pointer; line-height:1; }
+  .x:hover { color:#fff; }
+  .scroll { overflow-y:auto; flex:1; }
+  .seg { display:flex; margin:14px 18px 6px; background:#1b1c1f; border-radius:8px; padding:3px; }
+  .seg button { flex:1; background:none; border:0; padding:7px 0; border-radius:6px; cursor:pointer; color:var(--muted); font-weight:700; }
+  .seg button.on { background:#3a3c43; color:#fff; }
+  .grp { border-bottom:1px solid var(--line); }
+  .grow { display:flex; align-items:center; gap:14px; padding:18px 18px; }
+  .gt { flex:1; font-size:17px; }
+  .chev { background:none; border:0; color:var(--muted); cursor:pointer; font-size:20px; transition:transform .15s; padding:0 4px; }
+  .grp.open .chev { transform:rotate(90deg); }
+  .subs { display:none; padding:0 18px 12px 30px; }
+  .grp.open .subs { display:block; }
+  .srow { display:flex; align-items:center; gap:10px; padding:7px 0; font-size:13.5px; }
+  .srow .st { flex:1; }
+  .srow .ct { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+  .srow .hint { display:block; color:var(--muted); font-size:11.5px; }
+  .sw { width:16px; height:16px; border-radius:4px; border:2px solid; flex:none; }
+  .tg { position:relative; width:42px; height:24px; flex:none; }
+  .tg input { opacity:0; width:0; height:0; position:absolute; }
+  .tg span { position:absolute; inset:0; border-radius:12px; background:#55575e; cursor:pointer; transition:background .15s; }
+  .tg span:after { content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#3b3d44;
+                   box-shadow:0 1px 2px rgba(0,0,0,.4); transition:left .15s; }
+  .tg input:checked + span { background:var(--blue); }
+  .tg input:checked + span:after { left:21px; background:#3b4252; }
+  .tg.sm { width:34px; height:20px; } .tg.sm span:after { width:14px; height:14px; } .tg.sm input:checked + span:after { left:17px; }
+  .ramp { display:flex; gap:2px; margin-top:4px; } .ramp i { flex:1; font-style:normal; font-size:10px; text-align:center; border-radius:3px; color:#111; padding:1px 0; }
+  .foot { padding:14px 18px 20px; color:var(--muted); font-size:11.5px; }
+
+  /* briefing */
+  .bhead { padding:18px 18px 14px; border-bottom:1px solid var(--line); }
+  .bstat { display:flex; align-items:center; gap:12px; }
+  .bicon { width:42px; height:42px; border-radius:50%; display:grid; place-items:center; flex:none; }
+  .bicon svg { width:22px; height:22px; stroke:#fff; fill:none; stroke-width:2.5; }
+  .btitle { font-size:20px; font-weight:900; }
+  .bsub { color:var(--muted); font-size:12.5px; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+  .chip { background:#33353b; border-radius:14px; padding:4px 10px; font-size:12px; }
+  .chip b { color:#fff; }
+  .sec { padding:12px 14px 4px; }
+  .sech { font-size:11.5px; font-weight:900; letter-spacing:.8px; text-transform:uppercase; color:var(--muted); margin:6px 4px 8px; }
+  .card { background:var(--card); border-radius:10px; margin-bottom:10px; overflow:hidden; border:1px solid #33343a; }
+  .card > summary { list-style:none; display:flex; gap:11px; align-items:flex-start; padding:12px 14px; cursor:pointer; }
+  .card > summary::-webkit-details-marker { display:none; }
+  .dot { width:12px; height:12px; border-radius:50%; margin-top:4px; flex:none; box-shadow:0 0 0 3px rgba(255,255,255,.06); }
+  .ctitle { font-weight:700; font-size:14.5px; }
+  .clayer { color:var(--muted); font-size:12px; margin-top:1px; }
+  .tag { display:inline-block; font-size:10.5px; font-weight:900; letter-spacing:.4px; padding:2px 7px; border-radius:4px; margin-top:6px; text-transform:uppercase; }
+  .tag.active { background:rgba(255,59,92,.18); color:#ff7a90; } .tag.upcoming { background:rgba(245,180,0,.16); color:#ffd166; }
+  .tag.ended { background:#3a3b40; color:#a3a5ad; } .tag.perm { background:rgba(46,168,255,.15); color:#7cc6ff; }
+  .cbody { padding:0 14px 14px 37px; font-size:13px; }
+  .what { color:#cfd2da; margin-bottom:10px; }
+  dl { display:grid; grid-template-columns:84px 1fr; gap:4px 10px; margin:0; font-size:12.5px; }
+  dt { color:var(--muted); } dd { margin:0; word-break:break-word; }
+  .more { margin-top:8px; } .more summary { color:var(--blue); cursor:pointer; font-weight:700; font-size:12.5px; }
+  .more p { white-space:pre-wrap; color:#c2c5ce; margin:6px 0 0; font-size:12px; }
+  table.f { width:100%; border-collapse:collapse; margin-top:6px; font-size:11.5px; }
+  table.f td { border-top:1px solid #3a3b41; padding:3px 4px; vertical-align:top; word-break:break-word; }
+  table.f td:first-child { color:var(--muted); width:42%; }
+  .ev { display:flex; justify-content:space-between; gap:8px; padding:5px 0; border-top:1px solid #3a3b41; font-size:12.5px; }
+  .ev:first-child { border-top:0; }
+  .empty { color:var(--muted); text-align:center; padding:30px 20px; }
+  .disc { color:#7d808a; font-size:11px; padding:6px 18px 22px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="wx" title="Weather at map center"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><path d="M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 9.5 4.25 4.25 0 0 0 7 18z"/></svg><span id="wxT">--°</span></div>
+
+<div id="rightcol">
+  <button class="fab" id="statusFab" title="Open briefing"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
+  <button class="fab" id="resetFab" title="Reset view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg></button>
+  <button class="fab" id="pinFab" title="Brief map center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></button>
+</div>
+
+<div id="bottombar">
+  <button class="fab" id="zin" title="Zoom in">+</button>
+  <button class="fab" id="zout" title="Zoom out">−</button>
+  <button class="fab" id="locate" title="My location"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></button>
+  <button id="layersBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>Layers</button>
+</div>
+<div id="coords"></div>
+
+<aside class="drawer" id="layersDrawer">
+  <div class="dh"><span>Layers</span><button class="x" id="ldClose">✕</button></div>
+  <div class="seg" id="basemaps"><button data-b="dark" class="on">Dark</button><button data-b="light">Light</button><button data-b="sat">Satellite</button></div>
+  <div class="scroll" id="layerList"></div>
+</aside>
+
+<aside class="drawer" id="brief">
+  <div class="dh"><span>Flight briefing</span><button class="x" id="bClose">✕</button></div>
+  <div class="scroll" id="briefBody"><div class="empty">Click anywhere on the map to see every rule at that spot.</div></div>
+</aside>
+
+<script>
+const DATA = __DATA__, AIRPORTS = __AIRPORTS__, META = __META__;
+
+// ------------------------------------------------------------------ helpers
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+const fmtDate = s => s ? new Date(s).toLocaleString([], { dateStyle:"medium", timeStyle:"short" }) : "";
+function rel(ms) { const m = Math.round(ms / 6e4); if (m < 60) return "in " + m + " min"; const h = Math.round(m / 60);
+  return h < 48 ? "in " + h + " h" : "in " + Math.round(h / 24) + " days"; }
+function timeStatus(p) {
+  const s = p.window_start ? Date.parse(p.window_start) : null, e = p.window_end ? Date.parse(p.window_end) : null, n = Date.now();
+  if (!s && !e) return { k:"perm", label:"Always in effect" };
+  if (e && e < n) return { k:"ended", label:"Ended" };
+  if (s && s > n) return { k:"upcoming", label:"Starts " + rel(s - n) };
+  return { k:"active", label:"Active now" + (e ? " · ends " + rel(e - n) : "") };
+}
+function fmtAlt(ft, ref) {
+  if (ref === "UNL") return "Unlimited";
+  if (ft == null) return "not specified";
+  if (ref === "FL") return "FL" + String(Math.round(ft / 100)).padStart(3, "0");
+  if (ft === 0 && ref === "AGL") return "Surface";
+  return Math.round(ft).toLocaleString() + " ft " + (ref || "");
+}
+const altText = p => (p.floor_ft == null && p.ceiling_ft == null && !p.ceiling_ref) ? "See notes" : fmtAlt(p.floor_ft, p.floor_ref) + " → " + fmtAlt(p.ceiling_ft, p.ceiling_ref);
+const nm = (a, b) => { const R = 3440.065, t = Math.PI / 180, dLa = (b[1] - a[1]) * t, dLo = (b[0] - a[0]) * t;
+  const h = Math.sin(dLa / 2) ** 2 + Math.cos(a[1] * t) * Math.cos(b[1] * t) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+
+// ------------------------------------------------------------------ layer definitions (AirHub-like palette)
+const LAANC = [[0,"#ff5a6e","0"],[100,"#ff9f43","100"],[200,"#ffd43b","200"],[300,"#a9e34b","300"],[400,"#38d9a9","400"]];
+const laancColor = c => (LAANC.find(([v]) => (c ?? 0) <= v) || LAANC[4])[1];
+const PINK = "#ff2d6f", RED = "#ff3b30";
+const SUB = [
+  // group, id, data key, title, on, style, filter, extra
+  { g:"faa", id:"ctrl", src:"class_airspace", title:"Controlled airspace", hint:"Class B / C / D / E surface", on:true,
+    filter:p => p.effect === "authorization_required", style:() => ({ color:"#2ea8ff", weight:2.2, fillColor:"#1e88e5", fillOpacity:0.08 }) },
+  { g:"faa", id:"adv", src:"class_airspace", title:"Advisory airspace", hint:"Class E shelves, Mode C", on:true,
+    filter:p => p.effect !== "authorization_required", style:() => ({ color:"#a77bff", weight:1.3, dashArray:"6 7", fillOpacity:0, opacity:0.75 }) },
+  { g:"faa", id:"laanc", src:"laanc_grid", title:"LAANC grid", hint:"Max auto-approval altitude · zoom in", on:true, minZoom:11, ramp:true,
+    style:p => ({ stroke:false, fillColor:laancColor(p.ceiling_ft), fillOpacity:0.2 }) },
+  { g:"faa", id:"sua", src:"special_use_airspace", title:"Special use airspace", hint:"Restricted areas & MOAs", on:true,
+    style:p => p.effect === "restricted" ? { color:"#ff6b6b", weight:1.6, fillColor:"#ff6b6b", fillOpacity:0.2 }
+                                         : { color:"#c084fc", weight:1.2, dashArray:"4 5", fillColor:"#c084fc", fillOpacity:0.04 } },
+  { g:"faa", id:"apt", src:"_airports", title:"Airports", hint:"Public-use", on:true, kind:"airports" },
+  { g:"faa", id:"hp", src:"_heliports", title:"Heliports & private fields", hint:"", on:false, kind:"heliports", minZoom:9 },
+  { g:"sec", id:"tfr", src:"tfr_active", title:"Temporary flight restrictions", hint:"VIP, disaster, security, space ops", on:true,
+    style:p => ({ color:RED, weight:2, fillColor:RED, fillOpacity:timeStatus(p).k === "active" ? 0.3 : 0.15 }) },
+  { g:"sec", id:"notam", src:"notam_tfr", title:"NOTAM TFRs", hint:"From FAA NOTAM API", on:true,
+    style:() => ({ color:RED, weight:1.6, dashArray:"5 4", fillColor:RED, fillOpacity:0.15 }) },
+  { g:"sec", id:"nsufr", src:"nsufr", title:"National security sites", hint:"24/7 drone ban", on:true,
+    style:() => ({ color:PINK, weight:1.4, fillColor:PINK, fillOpacity:0.55 }) },
+  { g:"sec", id:"nsufrpt", src:"nsufr_part_time", title:"Part-time security sites", hint:"When activated", on:true,
+    style:() => ({ color:PINK, weight:1.4, dashArray:"5 4", fillColor:PINK, fillOpacity:0.25 }) },
+  { g:"sec", id:"nda", src:"nda_tfr", title:"National Defense Airspace", hint:"Activated by NOTAM", on:true,
+    style:() => ({ color:PINK, weight:1.4, dashArray:"6 4", fillColor:PINK, fillOpacity:0.2 }) },
+  { g:"sec", id:"prohib", src:"prohibited_areas", title:"Prohibited areas", hint:"No aircraft at all", on:true,
+    style:() => ({ color:PINK, weight:2, fillColor:PINK, fillOpacity:0.5 }) },
+  { g:"stad", id:"ring", src:"stadiums_3nm", title:"Stadium 3 NM rings", hint:"Restricted during events", on:true,
+    style:() => ({ color:"#f5a524", weight:1.3, fillOpacity:0 }) },
+  { g:"stad", id:"seams", src:"seams", title:"Live stadium events", hint:"Shown when active or within 24 h", on:true,
+    style:p => { const t = timeStatus(p), soon = t.k === "upcoming" && Date.parse(p.window_start) - Date.now() < 864e5;
+      return t.k === "active" ? { color:RED, weight:2, fillColor:RED, fillOpacity:0.38 }
+           : soon ? { color:RED, weight:1.6, dashArray:"3 4", fillOpacity:0.05, fillColor:RED } : { opacity:0, fillOpacity:0 }; } },
+  { g:"ground", id:"fria", src:"fria", title:"FRIAs", hint:"Fly without Remote ID", on:true, svg:true,
+    style:() => ({ color:"#b5e48c", weight:1, fillColor:"url(#hatch)", fillOpacity:1 }) },
+  { g:"ground", id:"fixed", src:"recreational_fixed_sites", title:"Recreational fixed sites", hint:"Club fields with FAA agreements", on:true, svg:true,
+    style:() => ({ color:"#b5e48c", weight:1, dashArray:"3 3", fillColor:"url(#hatch)", fillOpacity:0.7 }) },
+];
+const GROUPS = [["faa","FAA Data"],["sec","Security & TFRs"],["stad","Stadiums & Events"],["ground","Ground Insights"]];
+const LAYER_INFO = {
+  class_airspace:{ title:"Controlled airspace" }, laanc_grid:{ title:"LAANC grid" }, special_use_airspace:{ title:"Special use airspace" },
+  tfr_active:{ title:"Temporary flight restriction" }, notam_tfr:{ title:"NOTAM TFR" }, nsufr:{ title:"National security site" },
+  nsufr_part_time:{ title:"Part-time security site" }, nda_tfr:{ title:"National Defense Airspace" }, prohibited_areas:{ title:"Prohibited area" },
+  stadiums_3nm:{ title:"Stadium 3 NM ring" }, seams:{ title:"Stadium event TFR" }, fria:{ title:"FAA-Recognized Identification Area" },
+  recreational_fixed_sites:{ title:"Recreational fixed site" },
+};
+function explain(layer, p) {
+  switch (layer) {
+    case "tfr_active": case "notam_tfr": return "A temporary no-fly zone published by NOTAM (VIP movement, disaster, wildfire, space launch or security). Drones may not fly inside while it is in effect unless the FAA specifically authorizes it.";
+    case "nsufr": return "National-security UAS restriction (14 CFR 99.7). Drone flights are prohibited at all times over this facility. Violations can bring fines, criminal charges and interception of the drone.";
+    case "nsufr_part_time": return "National-security UAS restriction that applies only while activated. When active, drones are prohibited.";
+    case "nda_tfr": return "National Defense Airspace that becomes a no-fly TFR when activated by NOTAM.";
+    case "prohibited_areas": return "Charted prohibited airspace: no aircraft of any kind, including drones.";
+    case "stadiums_3nm": return "Major stadium. During qualifying MLB, NFL, NCAA D-I football and major motorsport events, drones are banned within 3 NM up to 3,000 ft AGL from 1 hour before to 1 hour after. No effect outside event times.";
+    case "seams": return "Stadium TFR for a scheduled event: no drones within 3 NM up to 3,000 ft AGL. The window shown already includes the 1-hour buffer before and after.";
+    case "laanc_grid": return "Controlled airspace near an airport. FAA authorization is required before flying (Part 107 and recreational). LAANC apps can approve instantly up to the altitude shown; a 0 ft square needs a FAADroneZone application.";
+    case "class_airspace": return p.effect === "authorization_required"
+      ? "Controlled airspace that reaches the ground. Get FAA authorization (LAANC or FAADroneZone) before flying here."
+      : "Airspace that normally begins above drone altitudes (e.g. Class E at 700 ft) or a Mode C veil. Usually no action needed under 400 ft AGL.";
+    case "special_use_airspace": return p.effect === "restricted"
+      ? "Military restricted area (live fire, testing). While active, flight needs permission of the controlling agency. Check times of use."
+      : "Military training airspace (MOA / warning / alert area). Not a drone ban, but expect fast, low military traffic when active.";
+    case "fria": return "FAA-Recognized Identification Area: drones without Remote ID may fly here within visual line of sight. Other rules still apply.";
+    case "recreational_fixed_sites": return "Recreational fixed site with an FAA agreement: recreational flyers may fly here in controlled airspace up to the site ceiling.";
+  }
+  return "";
+}
+const EFFECT = {
+  prohibited:{ label:"No-fly", color:"#ff3b5c", rank:0 }, restricted:{ label:"Restricted", color:"#ff8a3d", rank:1 },
+  authorization_required:{ label:"Authorization", color:"#2ea8ff", rank:2 }, caution:{ label:"Advisory", color:"#a77bff", rank:3 },
+  allowed:{ label:"Drone-friendly", color:"#8fd14f", rank:4 },
+};
+
+// ------------------------------------------------------------------ map + basemaps
+const map = L.map("map", { zoomControl:false, preferCanvas:true, attributionControl:true, worldCopyJump:true });
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/";
+map.createPane("labels"); map.getPane("labels").style.zIndex = 450; map.getPane("labels").style.pointerEvents = "none";
+const tl = (path, o = {}) => L.tileLayer(ESRI + path + "/MapServer/tile/{z}/{y}/{x}", { maxZoom:19, ...o });
+const BASEMAPS = {
+  dark: L.layerGroup([tl("Canvas/World_Dark_Gray_Base", { maxNativeZoom:16, attribution:"Esri, HERE, Garmin, © OpenStreetMap contributors" }),
+                      tl("Canvas/World_Dark_Gray_Reference", { maxNativeZoom:16, pane:"labels" })]),
+  light: L.layerGroup([tl("Canvas/World_Light_Gray_Base", { maxNativeZoom:16, attribution:"Esri, HERE, Garmin, © OpenStreetMap contributors" }),
+                       tl("Canvas/World_Light_Gray_Reference", { maxNativeZoom:16, pane:"labels" })]),
+  sat: L.layerGroup([tl("World_Imagery", { attribution:"Esri, Maxar, Earthstar Geographics" }),
+                     tl("Reference/World_Boundaries_and_Places", { pane:"labels" })]),
+};
+let basemap = BASEMAPS.dark.addTo(map);
+document.querySelectorAll("#basemaps button").forEach(b => b.onclick = () => {
+  map.removeLayer(basemap); basemap = BASEMAPS[b.dataset.b].addTo(map);
+  document.querySelectorAll("#basemaps button").forEach(x => x.classList.toggle("on", x === b));
+});
+const bb = META.bbox;
+const home = () => map.fitBounds([[bb[1], bb[0]], [bb[3], bb[2]]], { animate:false });
+home();
+
+const canvas = L.canvas({ padding:0.4 }), svg = L.svg({ padding:0.4 });
+function addHatch() {
+  const s = svg._container; if (!s || s.querySelector("#hatch")) return;
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  defs.innerHTML = '<pattern id="hatch" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">' +
+                   '<rect width="8" height="8" fill="#b5e48c" fill-opacity="0.08"/><line x1="0" y1="0" x2="0" y2="8" stroke="#c8ec9a" stroke-width="2.2" stroke-opacity="0.7"/></pattern>';
+  s.insertBefore(defs, s.firstChild);
+}
+
+// polygon layers
+const FEATS = {};  // sub id -> features (for counts / hit testing done on DATA directly)
+const LL = {};
+for (const d of SUB) {
+  if (d.kind) continue;
+  const feats = (DATA[d.src] || []).filter(f => !d.filter || d.filter(f.properties));
+  FEATS[d.id] = feats;
+  LL[d.id] = L.geoJSON(feats, { renderer:d.svg ? svg : canvas, interactive:false, style:f => d.style(f.properties) });
+}
+// airports
+const PLANE = '<svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>';
+const isPublicApt = a => a.type === "AD" && (!a.private || a.mil === "MIL");
+FEATS.apt = AIRPORTS.filter(isPublicApt); FEATS.hp = AIRPORTS.filter(a => !isPublicApt(a));
+LL.apt = L.layerGroup(FEATS.apt.map(a => L.marker([a.y, a.x], { interactive:false, keyboard:false,
+  icon:L.divIcon({ className:"", iconSize:[30, 30], iconAnchor:[15, 15],
+    html:`<div class="apt ${a.mil === "MIL" ? "mil" : ""}">${PLANE}</div><div class="apt-lbl">${esc(a.id)}</div>` }) })));
+LL.hp = L.layerGroup(FEATS.hp.map(a => L.marker([a.y, a.x], { interactive:false, keyboard:false,
+  icon:L.divIcon({ className:"", iconSize:[16, 16], iconAnchor:[8, 8], html:`<div class="hp">${a.type === "HP" ? "H" : "·"}</div>` }) })));
+
+const state = Object.fromEntries(SUB.map(d => [d.id, d.on]));
+const gstate = Object.fromEntries(GROUPS.map(([g]) => [g, true]));
+const ORDER = ["fria", "fixed", "adv", "laanc", "ctrl", "sua", "ring", "seams", "nda", "nsufrpt", "nsufr", "prohib", "notam", "tfr", "hp", "apt"];
+function apply() {
+  const z = map.getZoom();
+  for (const id of ORDER) {
+    const d = SUB.find(s => s.id === id), l = LL[id]; if (!l) continue;
+    const show = state[id] && gstate[d.g] && z >= (d.minZoom || 0) && (FEATS[id] || []).length;
+    if (show && !map.hasLayer(l)) l.addTo(map); else if (!show && map.hasLayer(l)) map.removeLayer(l);
+  }
+  for (const id of ORDER) if (LL[id] && map.hasLayer(LL[id]) && LL[id].bringToFront) LL[id].bringToFront();
+  addHatch();
+  const m = document.getElementById("map");
+  m.classList.toggle("z-lo", z < 9); m.classList.toggle("z-vlo", z < 8);
+  if (LL.apt) { const showApt = state.apt && gstate.faa && z >= 7; if (showApt !== map.hasLayer(LL.apt)) showApt ? LL.apt.addTo(map) : map.removeLayer(LL.apt); }
+}
+map.on("zoomend", apply);
+apply();
+
+// ------------------------------------------------------------------ layers drawer
+function swatch(d) {
+  if (d.kind === "airports") return `<span class="sw" style="background:#1e9bff;border-color:#fff;border-radius:50%"></span>`;
+  if (d.kind === "heliports") return `<span class="sw" style="background:#6b6e78;border-color:#d6d8de;border-radius:50%"></span>`;
+  const s = d.style((FEATS[d.id] || [])[0]?.properties || { effect:"restricted" });
+  const fill = s.fillColor === "url(#hatch)" ? "repeating-linear-gradient(45deg,#c8ec9a 0 2px,transparent 2px 6px)" : (s.fillOpacity ? s.fillColor : "transparent");
+  return `<span class="sw" style="background:${fill};border-color:${s.stroke === false ? s.fillColor : s.color}"></span>`;
+}
+const list = document.getElementById("layerList");
+list.innerHTML = GROUPS.map(([g, title]) => `
+  <div class="grp" data-g="${g}">
+    <div class="grow"><label class="tg"><input type="checkbox" data-group="${g}" checked><span></span></label>
+      <span class="gt">${title}</span><button class="chev">›</button></div>
+    <div class="subs">${SUB.filter(d => d.g === g).map(d => `
+      <div class="srow"><label class="tg sm"><input type="checkbox" data-sub="${d.id}" ${d.on ? "checked" : ""}><span></span></label>
+        ${swatch(d)}<span class="st">${esc(d.title)}<span class="hint">${esc(d.hint)}</span>
+        ${d.ramp ? `<span class="ramp">${LAANC.map(([v, c, t]) => `<i style="background:${c}">${t}</i>`).join("")}</span>` : ""}</span>
+        <span class="ct">${(FEATS[d.id] || []).length.toLocaleString()}</span></div>`).join("")}
+    </div></div>`).join("") + footHtml();
+function footHtml() {
+  const ok = META.manifest.filter(r => r.status === "ok"), newest = ok.map(r => r.fetched_utc).sort().pop();
+  const bad = META.manifest.filter(r => r.status !== "ok");
+  return `<div class="foot">FAA data downloaded ${esc(fmtDate(newest))}.${bad.length ? "<br>Not loaded: " + bad.map(r => esc(r.layer) + " (" + esc(r.status) + ")").join(", ") : ""}
+    <br><br>Sources: FAA UAS Data Delivery System, SEAMS, tfr.faa.gov. Reference only: confirm with B4UFLY / LAANC before flying.</div>`;
+}
+list.querySelectorAll(".chev").forEach(b => b.onclick = () => b.closest(".grp").classList.toggle("open"));
+list.querySelectorAll("[data-group]").forEach(cb => cb.onchange = () => { gstate[cb.dataset.group] = cb.checked; apply(); });
+list.querySelectorAll("[data-sub]").forEach(cb => cb.onchange = () => { state[cb.dataset.sub] = cb.checked; apply(); });
+const ld = document.getElementById("layersDrawer");
+document.getElementById("layersBtn").onclick = () => ld.classList.toggle("open");
+document.getElementById("ldClose").onclick = () => ld.classList.remove("open");
+
+// ------------------------------------------------------------------ buttons, coords, weather
+document.getElementById("zin").onclick = () => map.zoomIn();
+document.getElementById("zout").onclick = () => map.zoomOut();
+document.getElementById("resetFab").onclick = home;
+document.getElementById("pinFab").onclick = () => brief(map.getCenter());
+document.getElementById("locate").onclick = () => navigator.geolocation
+  ? navigator.geolocation.getCurrentPosition(p => { const ll = L.latLng(p.coords.latitude, p.coords.longitude); map.setView(ll, 13); brief(ll); },
+                                             () => alert("Location not available here (browser blocked it)."))
+  : alert("Location not supported.");
+map.on("mousemove", e => document.getElementById("coords").textContent = e.latlng.lat.toFixed(6) + "  " + e.latlng.lng.toFixed(6));
+let wxTimer;
+async function weather(ll) {
+  const u = `https://api.open-meteo.com/v1/forecast?latitude=${ll.lat.toFixed(3)}&longitude=${ll.lng.toFixed(3)}` +
+            `&current=temperature_2m,wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph`;
+  try { const r = await fetch(u); return (await r.json()).current; } catch { return null; }
+}
+const updateWx = async () => { const c = await weather(map.getCenter()); if (c) {
+  document.getElementById("wxT").textContent = Math.round(c.temperature_2m) + "°";
+  document.getElementById("wx").title = `Map center: ${Math.round(c.temperature_2m)}°F, wind ${Math.round(c.wind_speed_10m)} mph, gusts ${Math.round(c.wind_gusts_10m)} mph`; } };
+map.on("moveend", () => { clearTimeout(wxTimer); wxTimer = setTimeout(updateWx, 700); });
+updateWx();
+
+// ------------------------------------------------------------------ hit testing
+for (const k in DATA) for (const f of DATA[k]) f._bb = gbbox(f.geometry);
+function gbbox(g) { let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+  const w = x => { if (typeof x[0] === "number") { if (x[0] < a) a = x[0]; if (x[0] > c) c = x[0]; if (x[1] < b) b = x[1]; if (x[1] > d) d = x[1]; } else x.forEach(w); };
+  w(g.coordinates); return [a, b, c, d]; }
+function inRing(x, y, r) { let o = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+  const xi = r[i][0], yi = r[i][1], xj = r[j][0], yj = r[j][1]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) o = !o; } return o; }
+const inPoly = (x, y, rings) => inRing(x, y, rings[0]) && !rings.slice(1).some(h => inRing(x, y, h));
+function contains(f, x, y) { const b = f._bb; if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) return false;
+  const g = f.geometry; return g.type === "Polygon" ? inPoly(x, y, g.coordinates) : g.type === "MultiPolygon" && g.coordinates.some(p => inPoly(x, y, p)); }
+
+// ------------------------------------------------------------------ status + briefing
+const ICONS = {
+  check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>', x:'<path d="M6 6l12 12M18 6L6 18"/>', key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>',
+  warn:'<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18v.5"/>', clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+};
+function overall(hits) {
+  const live = h => ["active", "perm"].includes(timeStatus(h.p).k) && h.layer !== "stadiums_3nm";
+  if (hits.some(h => h.p.effect === "prohibited" && live(h))) return { k:"nofly", label:"No-Fly Zone", color:"#e5223f", icon:"x" };
+  if (hits.some(h => h.p.effect === "restricted")) return { k:"restr", label:"Restricted Airspace", color:"#e8681f", icon:"warn" };
+  if (hits.some(h => h.p.effect === "authorization_required")) return { k:"auth", label:"Authorization Required", color:"#1b7fd1", icon:"key" };
+  if (hits.some(h => h.p.effect === "prohibited")) return { k:"sched", label:"Caution: Scheduled TFR", color:"#c98a00", icon:"clock" };
+  return { k:"clear", label:"Clear to Fly", color:"#1f7a3f", icon:"check" };
+}
+let pinMarker = null, hl = L.geoJSON(null, { renderer:canvas, interactive:false, style:{ color:"#fff", weight:2.5, fillOpacity:0, dashArray:null } }).addTo(map);
+map.on("click", e => brief(e.latlng));
+
+async function brief(ll) {
+  const x = ll.lng, y = ll.lat, hits = [];
+  for (const k in DATA) for (const f of DATA[k]) {
+    if (k === "seams" && timeStatus(f.properties).k === "ended") continue;
+    if (contains(f, x, y)) hits.push({ layer:k, p:f.properties, f });
+  }
+  hits.sort((a, b) => (EFFECT[a.p.effect]?.rank ?? 9) - (EFFECT[b.p.effect]?.rank ?? 9));
+  const st = overall(hits);
+  hl.clearLayers(); hits.filter(h => !["seams", "laanc_grid"].includes(h.layer)).forEach(h => hl.addData(h.f));
+  hl.bringToFront();
+  if (pinMarker) pinMarker.remove();
+  pinMarker = L.marker(ll, { interactive:false, zIndexOffset:1000, icon:L.divIcon({ className:"", iconSize:[0, 0], html:`
+    <div class="pinwrap"><div class="ring"></div>
+      <svg class="pin" viewBox="0 0 32 44"><path d="M16 1C8 1 2 7 2 15c0 10 14 27 14 27s14-17 14-27C30 7 24 1 16 1z" fill="${st.color}" stroke="#fff" stroke-width="2"/><circle cx="16" cy="15" r="5" fill="#fff"/></svg>
+      <div class="pill" style="background:${st.color}" onclick="document.getElementById('brief').classList.add('open')">${st.label}</div></div>` }) }).addTo(map);
+  const fab = document.getElementById("statusFab");
+  fab.style.background = st.color; fab.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3">${ICONS[st.icon]}</svg>`;
+
+  const laanc = hits.filter(h => h.layer === "laanc_grid").map(h => h.p.ceiling_ft).filter(v => v != null);
+  const near = AIRPORTS.filter(isPublicApt).map(a => ({ a, d:nm([x, y], [a.x, a.y]) })).sort((p, q) => p.d - q.d).slice(0, 3);
+  const chips = [];
+  if (laanc.length) chips.push(Math.min(...laanc) > 0 ? `LAANC up to <b>${Math.min(...laanc)} ft</b>` : `<b>LAANC 0 ft</b>: FAADroneZone only`);
+  if (near[0]) chips.push(`Nearest airport <b>${esc(near[0].a.id)}</b> ${near[0].d.toFixed(1)} NM`);
+  const groups = [["Restrictions", h => ["prohibited", "restricted"].includes(h.p.effect)],
+                  ["Authorizations", h => h.p.effect === "authorization_required"],
+                  ["Advisories", h => h.p.effect === "caution"], ["Ground insights", h => h.p.effect === "allowed"]];
+  let body = `<div class="bhead"><div class="bstat"><div class="bicon" style="background:${st.color}"><svg viewBox="0 0 24 24">${ICONS[st.icon]}</svg></div>
+      <div><div class="btitle">${st.label}</div><div class="bsub">${y.toFixed(5)}, ${x.toFixed(5)} · ${hits.length} rule${hits.length === 1 ? "" : "s"} here</div></div></div>
+      <div class="chips" id="chips">${chips.map(c => `<span class="chip">${c}</span>`).join("")}<span class="chip" id="wxchip">Weather…</span></div></div>`;
+  if (!hits.length) body += `<div class="empty">No mapped restrictions at this spot. Standard Part 107 / recreational rules still apply (400 ft AGL, visual line of sight).</div>`;
+  for (const [title, test] of groups) {
+    const hs = hits.filter(test); if (!hs.length) continue;
+    body += `<div class="sec"><div class="sech">${title} · ${hs.length}</div>`;
+    const seams = hs.filter(h => h.layer === "seams"); let seamsDone = false;
+    for (const h of hs) {
+      if (h.layer === "seams") { if (!seamsDone) { body += seamsCard(seams); seamsDone = true; } continue; }
+      body += card(h);
+    }
+    body += `</div>`;
+  }
+  if (near.length) body += `<div class="sec"><div class="sech">Nearby airports</div><div class="card"><div class="cbody" style="padding:12px 14px">${near.map(n =>
+    `<div class="ev"><span><b>${esc(n.a.id)}</b> ${esc(n.a.name)}</span><span style="white-space:nowrap">${n.d.toFixed(1)} NM</span></div>`).join("")}</div></div></div>`;
+  body += `<div class="disc">Reference only. Confirm with an FAA-approved app (B4UFLY / LAANC) before flying.</div>`;
+  document.getElementById("briefBody").innerHTML = body;
+  document.getElementById("brief").classList.add("open");
+  const c = await weather(ll), wc = document.getElementById("wxchip");
+  if (wc) wc.innerHTML = c ? `${Math.round(c.temperature_2m)}°F · wind <b>${Math.round(c.wind_speed_10m)}</b> mph, gusts <b>${Math.round(c.wind_gusts_10m)}</b>` : "Weather unavailable";
+}
+
+function card(h) {
+  const p = h.p, e = EFFECT[p.effect] || EFFECT.caution, t = timeStatus(p), L0 = h.layer;
+  const title = L0 === "laanc_grid" ? `LAANC ${p.ceiling_ft > 0 ? "up to " + p.ceiling_ft + " ft" : "0 ft (no auto-approval)"}` : (p.name || LAYER_INFO[L0]?.title);
+  let when;
+  if (L0 === "stadiums_3nm") when = "Only during qualifying events";
+  else if (t.k === "perm") when = "Always in effect";
+  else when = `${p.window_start ? esc(fmtDate(p.window_start)) : "now"} → ${p.window_end ? esc(fmtDate(p.window_end)) : "until further notice"}`;
+  const tag = L0 === "stadiums_3nm" ? `<span class="tag upcoming">Event-based</span>` : `<span class="tag ${t.k}">${esc(t.label)}</span>`;
+  const fields = Object.entries(p.fields || {});
+  return `<details class="card"><summary><span class="dot" style="background:${e.color}"></span><div style="flex:1;min-width:0">
+      <div class="ctitle">${esc(title)}</div><div class="clayer">${esc(LAYER_INFO[L0]?.title || L0)} · ${esc(e.label)}</div>${tag}</div></summary>
+    <div class="cbody"><div class="what">${esc(explain(L0, p))}</div>
+      <dl>${L0 === "laanc_grid" ? `<dt>Airport</dt><dd>${esc(p.name)}</dd>` : `<dt>Altitude</dt><dd>${esc(altText(p))}</dd>`}
+        <dt>When</dt><dd>${when}</dd><dt>Rule</dt><dd>${esc(p.citation || "—")}</dd>
+        <dt>Confidence</dt><dd>${esc(p.confidence || "—")}</dd>
+        <dt>Updated</dt><dd>${esc(fmtDate(p.source_last_edit) || "—")}${p.source_url && p.source_url.includes("tfr.faa.gov") ? ` · <a style="color:#7cc6ff" href="${esc(p.source_url)}" target="_blank">tfr.faa.gov</a>` : ""}</dd></dl>
+      ${p.notes ? `<details class="more" ${p.notes.length < 240 ? "open" : ""}><summary>Notes</summary><p>${esc(p.notes)}</p></details>` : ""}
+      ${fields.length ? `<details class="more"><summary>All FAA fields (${fields.length})</summary><table class="f">${fields.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table></details>` : ""}
+    </div></details>`;
+}
+function seamsCard(hs) {
+  hs.sort((a, b) => Date.parse(a.p.window_start) - Date.parse(b.p.window_start));
+  const p0 = hs[0].p, live = hs.some(h => timeStatus(h.p).k === "active");
+  return `<details class="card" ${live ? "open" : ""}><summary><span class="dot" style="background:${EFFECT.prohibited.color}"></span><div style="flex:1">
+      <div class="ctitle">${hs.length} stadium event${hs.length > 1 ? "s" : ""} scheduled</div><div class="clayer">Stadium event TFR · No-fly during events</div>
+      <span class="tag ${live ? "active" : "upcoming"}">${live ? "Event TFR active now" : "Next: " + esc(fmtDate(p0.window_start))}</span></div></summary>
+    <div class="cbody"><div class="what">${esc(explain("seams", p0))}</div>
+      <dl><dt>Altitude</dt><dd>${esc(altText(p0))}</dd><dt>Rule</dt><dd>${esc(p0.citation)}</dd></dl>
+      <div style="margin-top:10px">${hs.slice(0, 30).map(h => { const t = timeStatus(h.p);
+        return `<div class="ev"><span>${esc(h.p.name)}</span><span style="white-space:nowrap">${esc(fmtDate(h.p.window_start))}${t.k === "active" ? ' <span class="tag active" style="margin:0">Now</span>' : ""}</span></div>`; }).join("")}</div>
+    </div></details>`;
+}
+document.getElementById("bClose").onclick = () => document.getElementById("brief").classList.remove("open");
+document.getElementById("statusFab").onclick = () => document.getElementById("brief").classList.add("open");
+</script>
+</body>
+</html>
