@@ -159,13 +159,17 @@ def num(value):
     return v if math.isfinite(v) else None
 
 
-def adds_alt(val, uom, code):
-    """FAA ADDS altitude fields (VAL/UOM/CODE) -> (feet, ref)."""
-    code = (code or "").upper()
+def adds_alt(val, uom, code, desc=None):
+    """FAA ADDS altitude fields (VAL/UOM/CODE/DESC) -> (feet, ref)."""
+    code, desc = (code or "").upper(), (desc or "").upper()
     if code == "UNLTD":
         return None, "UNL"
+    if code == "BYNOTAM":
+        return None, "NOTAM"
     v = num(val)
-    if v is None or v <= -9000:          # ADDS uses -9998 style sentinels for "not specified"
+    if v is not None and v <= -9000 and desc == "AA":
+        return 18000.0, "MSL"            # -9998 + AA = up to but not including Class A (18,000 ft MSL)
+    if v is None or v <= -9000:          # other -9998 sentinels: not specified
         return None, None
     if (uom or "").upper() == "FL" or code == "STD":
         return v * 100, "FL"
@@ -311,7 +315,7 @@ SURFACE_CLASSES = {"CLASS_B", "CLASS_C", "CLASS_D", "CLASS_E2", "CLASS_E3", "CLA
 def r_class(g, p, url):
     lt, cls = p.get("LOCAL_TYPE") or "", p.get("CLASS") or ""
     floor = adds_alt(p.get("LOWER_VAL"), p.get("LOWER_UOM"), p.get("LOWER_CODE"))
-    ceil = adds_alt(p.get("UPPER_VAL"), p.get("UPPER_UOM"), p.get("UPPER_CODE"))
+    ceil = adds_alt(p.get("UPPER_VAL"), p.get("UPPER_UOM"), p.get("UPPER_CODE"), p.get("UPPER_DESC"))
     if lt in SURFACE_CLASSES or (cls in ("B", "C", "D") and p.get("TYPE_CODE") in ("CLASS", "CTR")):
         effect, conf = "authorization_required", "high"
         note = f"Class {cls} controlled airspace: authorization (LAANC or FAADroneZone) needed to fly inside it."
@@ -319,7 +323,9 @@ def r_class(g, p, url):
         effect, conf = "caution", "medium"
         note = f"{lt or p.get('TYPE_CODE')} (class {cls or 'n/a'}): normally above drone altitudes or advisory only."
     return rule(g, "class_airspace", p.get("GLOBAL_ID"), p.get("NAME"), effect, floor, ceil,
-                notes=join(note, p.get("WKHR_RMK") and f"Hours: {p.get('WKHR_RMK')}"),
+                notes=join(note, "Ceiling: up to but not including 18,000 ft MSL (base of Class A)"
+                           if (p.get("UPPER_DESC") or "").upper() == "AA" else None,
+                           p.get("WKHR_RMK") and f"Hours: {p.get('WKHR_RMK')}"),
                 citation="14 CFR 107.41; 14 CFR Part 71", confidence=conf, source_url=url, attrs=p)
 
 
@@ -337,7 +343,7 @@ def r_sua(g, p, url, layer="special_use_airspace"):
     effect, label, cite = SUA_TYPES.get(p.get("TYPE_CODE"), ("caution", f"SUA type {p.get('TYPE_CODE')}", "14 CFR Part 73"))
     return rule(g, layer, p.get("GLOBAL_ID"), p.get("NAME"), effect,
                 adds_alt(p.get("LOWER_VAL"), p.get("LOWER_UOM"), p.get("LOWER_CODE")),
-                adds_alt(p.get("UPPER_VAL"), p.get("UPPER_UOM"), p.get("UPPER_CODE")),
+                adds_alt(p.get("UPPER_VAL"), p.get("UPPER_UOM"), p.get("UPPER_CODE"), p.get("UPPER_DESC")),
                 notes=join(label, p.get("TIMESOFUSE") and f"Times of use: {p.get('TIMESOFUSE')}",
                            p.get("CONT_AGENT") and f"Controlling agency: {p.get('CONT_AGENT')}", p.get("REMARKS")),
                 citation=cite + ("; 14 CFR 99.7" if p.get("TYPE_CODE") == "P" else ""), source_url=url, attrs=p)

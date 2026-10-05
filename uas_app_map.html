@@ -179,12 +179,20 @@ function timeStatus(p) {
 }
 function fmtAlt(ft, ref) {
   if (ref === "UNL") return "Unlimited";
+  if (ref === "NOTAM") return "set by NOTAM";
   if (ft == null) return "not specified";
   if (ref === "FL") return "FL" + String(Math.round(ft / 100)).padStart(3, "0");
   if (ft === 0 && ref === "AGL") return "Surface";
   return Math.round(ft).toLocaleString() + " ft " + (ref || "");
 }
-const altText = p => (p.floor_ft == null && p.ceiling_ft == null && !p.ceiling_ref) ? "See notes" : fmtAlt(p.floor_ft, p.floor_ref) + " → " + fmtAlt(p.ceiling_ft, p.ceiling_ref);
+const altText = p => (p.floor_ft == null && p.ceiling_ft == null && !p.ceiling_ref) ? "See notes" : fmtAlt(p.floor_ft, p.floor_ref) + " → " +
+  ((p.fields || {}).UPPER_DESC === "AA" ? "up to (not incl.) 18,000 ft MSL" : fmtAlt(p.ceiling_ft, p.ceiling_ref));
+function hoursText(p) {
+  const f = p.fields || {};
+  if (f.WKHR_CODE === "H24") return "Continuous (H24)";
+  if (f.WKHR_RMK || f.TIMESOFUSE) return "Part-time: " + (f.WKHR_RMK || f.TIMESOFUSE);
+  return "Always in effect";
+}
 const nm = (a, b) => { const R = 3440.065, t = Math.PI / 180, dLa = (b[1] - a[1]) * t, dLo = (b[0] - a[0]) * t;
   const h = Math.sin(dLa / 2) ** 2 + Math.cos(a[1] * t) * Math.cos(b[1] * t) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
 
@@ -467,7 +475,7 @@ function card(h) {
   const title = L0 === "laanc_grid" ? `LAANC ${p.ceiling_ft > 0 ? "up to " + p.ceiling_ft + " ft" : "0 ft (no auto-approval)"}` : (p.name || LAYER_INFO[L0]?.title);
   let when;
   if (L0 === "stadiums_3nm") when = "Only during qualifying events";
-  else if (t.k === "perm") when = "Always in effect";
+  else if (t.k === "perm") when = esc(hoursText(p));
   else when = `${p.window_start ? esc(fmtDate(p.window_start)) : "now"} → ${p.window_end ? esc(fmtDate(p.window_end)) : "until further notice"}`;
   const tag = L0 === "stadiums_3nm" ? `<span class="tag upcoming">Event-based</span>` : `<span class="tag ${t.k}">${esc(t.label)}</span>`;
   const fields = Object.entries(p.fields || {});

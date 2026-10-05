@@ -304,6 +304,7 @@ function explain(layer, p) {
 
 function fmtAlt(ft, ref) {
   if (ref === "UNL") return "Unlimited";
+  if (ref === "NOTAM") return "set by NOTAM";
   if (ft === null || ft === undefined) return "not specified";
   if (ref === "FL") return "FL" + String(Math.round(ft / 100)).padStart(3, "0") + " (" + Math.round(ft).toLocaleString() + " ft)";
   if (ft === 0 && ref === "AGL") return "Surface";
@@ -311,7 +312,14 @@ function fmtAlt(ft, ref) {
 }
 function altText(p) {
   if (p.floor_ft == null && p.ceiling_ft == null && !p.ceiling_ref) return "Not specified (see notes)";
-  return fmtAlt(p.floor_ft, p.floor_ref) + " → " + fmtAlt(p.ceiling_ft, p.ceiling_ref);
+  const top = (p.fields || {}).UPPER_DESC === "AA" ? "up to (not incl.) 18,000 ft MSL" : fmtAlt(p.ceiling_ft, p.ceiling_ref);
+  return fmtAlt(p.floor_ft, p.floor_ref) + " → " + top;
+}
+function hoursText(p) {
+  const f = p.fields || {};
+  if (f.WKHR_CODE === "H24") return "Continuous (H24)";
+  if (f.WKHR_RMK || f.TIMESOFUSE) return "Part-time: " + (f.WKHR_RMK || f.TIMESOFUSE);
+  return "Always in effect";
 }
 
 // ---------------------------------------------------------------- map
@@ -457,7 +465,7 @@ function card(layer, p) {
   const d = DEF[layer], eff = EFFECTS[p.effect] || EFFECTS.caution, st = timeStatus(p);
   let when;
   if (layer === "stadiums_3nm") when = "Only during qualifying events (1 hr before → 1 hr after)";
-  else if (st.k === "perm") when = layer === "laanc_grid" || layer === "class_airspace" ? "Always (check airport hours for Class D)" : "Always in effect";
+  else if (st.k === "perm") when = esc(hoursText(p));
   else when = `${p.window_start ? esc(fmtDate(p.window_start)) : "now"} → ${p.window_end ? esc(fmtDate(p.window_end)) : "until further notice"}`;
   const fields = Object.entries(p.fields || {});
   const notes = p.notes || "";
