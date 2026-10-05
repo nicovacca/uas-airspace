@@ -1,0 +1,4 @@
+requests==2.34.2
+geopandas==1.2.0
+pyogrio==0.13.0
+streamlit==1.65.0
