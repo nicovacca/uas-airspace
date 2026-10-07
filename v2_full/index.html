@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<title>v2_full – U.S. Drone Airspace</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Lato:400,700,900&display=swap">
@@ -181,8 +182,9 @@
   <div class="scroll" id="briefBody"><div class="empty">Click anywhere on the map to see every rule at that spot.</div></div>
 </aside>
 
+<script src="data/states.js"></script>
 <script>
-let DATA = __DATA__, AIRPORTS = __AIRPORTS__, OSM = {}; const META = __META__;
+let DATA = {}, AIRPORTS = [], OSM = {}; const META = window.UAS_META;
 
 // ------------------------------------------------------------------ helpers
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));

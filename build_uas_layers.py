@@ -24,7 +24,7 @@ Columns on every feature:
   floor_ft, floor_ref, ceiling_ft, ceiling_ref   (ref: AGL | MSL | FL | UNL)
   window_start, window_end   ISO UTC; empty = permanent / not time-limited
   notes, citation
-  confidence    high (taken directly from FAA fields) | medium (derived) | low (parsed / approximated)
+  rule_case     which labeling rule produced `effect` (see make_rule_review.py; decisions in rule_decisions.json)
   source_url, source_last_edit, fetched_utc, source_attrs (original FAA attributes as JSON)
 """
 
@@ -59,7 +59,7 @@ TFR_WFS = (TFR_BASE + "/geoserver/TFR/ows?service=WFS&version=1.1.0&request=GetF
 NOTAM_API = "https://external-api.faa.gov/notamapi/v1/notams"
 
 COLUMNS = ["layer", "source_id", "name", "effect", "floor_ft", "floor_ref", "ceiling_ft", "ceiling_ref",
-           "window_start", "window_end", "notes", "citation", "confidence",
+           "window_start", "window_end", "schedule", "notes", "citation", "rule_case",
            "source_url", "source_last_edit", "fetched_utc", "source_attrs"]
 NUMERIC = {"floor_ft", "ceiling_ft"}
 MANIFEST_COLS = ["layer", "group", "status", "count", "server_last_edit", "fetched_utc",
@@ -231,14 +231,53 @@ def in_bbox(geom, bbox):
     return bool(b) and not (b[2] < bbox[0] or b[0] > bbox[2] or b[3] < bbox[1] or b[1] > bbox[3])
 
 
+# Reviewed labeling decisions (written by the rule review page). They override the default
+# effect / citation for a rule_case, so a decision is made once and applied on every build.
+DECISIONS_FILE = Path(__file__).resolve().parent / "rule_decisions.json"
+_DEC_RAW = json.loads(DECISIONS_FILE.read_text(encoding="utf-8")) if DECISIONS_FILE.exists() else {}
+DECISIONS = {k: {**v, "effect": v.get("decision") or v.get("effect")}
+             for k, v in (_DEC_RAW.get("decisions", _DEC_RAW)).items() if isinstance(v, dict)}
+EXCLUDE_NOTAMS = set(_DEC_RAW.get("exclude_notams", []))
+OVERRIDES = _DEC_RAW.get("overrides", [])    # e.g. force the Ceiba, PR TFR to prohibited     # e.g. 4/9383 (DC speed restriction, not a drone ban)
+
+FAA_REGION_NAME = re.compile(r"^A(AL|CE|EA|GL|NE|NM|SO|SW|WP)\b")   # FAA region prefix, e.g. "AWP CQ D SAIPAN ISLAND"
+FOREIGN_NAME = re.compile(r"\b(ACC|TORONTO|VANCOUVER|MONTREAL)\b")
+
+
+def class_is_us(p):
+    """U.S.-designation test for Class_Airspace records (final review 2026-10-06).
+    Keep U.S. class types (CLASS_A..CLASS_E6, MODE C) that are not known foreign names. Region-prefixed
+    CTR/TMA records with a D/E2-E6 token (Saipan, Midway) and state-suffixed CTLZ records (Houlton ME,
+    International Falls MN) duplicate proper U.S. class records already in the data, so they are dropped.
+    Point Roberts (ANM BC C ...) is kept: Canadian-controlled Class C over U.S. soil."""
+    n, lt = p.get("NAME") or "", p.get("LOCAL_TYPE") or ""
+    if FAA_REGION_NAME.match(n):
+        return not re.search(r"\b(E[2-6]|D)\b", n)
+    return (lt.startswith("CLASS_") or lt == "MODE C") and not FOREIGN_NAME.search(n)
+
+
+def sua_is_us(p):
+    """Special use / prohibited airspace: the FAA record's COUNTRY field (Canadian records are dropped)."""
+    c = (p.get("COUNTRY") or "").upper()
+    return c in ("UNITED STATES", "") and not (p.get("NAME") or "").startswith("(MY)")
+
+
 def rule(geom, layer, source_id, name, effect, floor=(None, None), ceiling=(None, None),
-         window=(None, None), notes=None, citation=None, confidence="high", source_url=None, attrs=None):
+         window=(None, None), notes=None, citation=None, case=None, source_url=None, attrs=None, schedule=None):
+    d = DECISIONS.get(case) or {}
+    effect, citation = d.get("effect") or effect, d.get("citation") or citation
+    if d.get("note"):
+        notes = join(notes, d["note"])
+    for o in OVERRIDES:
+        if o.get("layer") == layer and (o.get("name_contains") or "\0").upper() in (name or "").upper():
+            effect, notes = o.get("decision") or effect, join(notes, o.get("note"))
     return {"type": "Feature", "geometry": geom, "properties": {
         "layer": layer, "source_id": None if source_id is None else str(source_id), "name": name,
         "effect": effect, "floor_ft": floor[0], "floor_ref": floor[1],
         "ceiling_ft": ceiling[0], "ceiling_ref": ceiling[1],
         "window_start": window[0], "window_end": window[1],
-        "notes": notes, "citation": citation, "confidence": confidence, "source_url": source_url,
+        "schedule": json.dumps(schedule) if schedule else None,
+        "notes": notes, "citation": citation, "rule_case": case, "source_url": source_url,
         "source_attrs": json.dumps(attrs, default=str) if attrs is not None else None}}
 
 
@@ -293,6 +332,7 @@ def arcgis_source(service, to_rule, out_fields="*", page_size=2000):
         ctx.last_edit, max_rec = arcgis_meta(url)
         for feats in arcgis_pages(url, ctx.bbox, out_fields, page_size=min(max_rec, page_size)):
             yield [r for r in (to_rule(f["geometry"], f.get("properties") or {}, url) for f in feats) if r]
+    source.to_rule = to_rule          # lets --renormalize re-label stored data without downloading
     return source
 
 
@@ -306,27 +346,34 @@ def r_laanc(g, p, url):
                       "apply through FAADroneZone.")
     return rule(g, "laanc_grid", p.get("GLOBALID") or p.get("OBJECTID"), apt or "UAS facility map grid",
                 "authorization_required", (0.0, "AGL"), (c, "AGL"), notes=join(note, p.get("AIRSPACE_1")),
-                citation="14 CFR 107.41", source_url=url, attrs=p)
+                citation="14 CFR 107.41", case="LAANC:CEILING>0" if c else "LAANC:CEILING=0", source_url=url, attrs=p)
 
 
 SURFACE_CLASSES = {"CLASS_B", "CLASS_C", "CLASS_D", "CLASS_E2", "CLASS_E3", "CLASS_E4"}
 
 
 def r_class(g, p, url):
+    if not class_is_us(p):
+        return None
     lt, cls = p.get("LOCAL_TYPE") or "", p.get("CLASS") or ""
     floor = adds_alt(p.get("LOWER_VAL"), p.get("LOWER_UOM"), p.get("LOWER_CODE"))
     ceil = adds_alt(p.get("UPPER_VAL"), p.get("UPPER_UOM"), p.get("UPPER_CODE"), p.get("UPPER_DESC"))
-    if lt in SURFACE_CLASSES or (cls in ("B", "C", "D") and p.get("TYPE_CODE") in ("CLASS", "CTR")):
-        effect, conf = "authorization_required", "high"
+    shelf = lt in ("CLASS_B", "CLASS_C") and (floor[0] or 0) > 0
+    if shelf:
+        effect = "caution"
+        note = (f"Class {cls} shelf starting at {floor[0]:,.0f} ft {floor[1] or ''}. The airspace below the shelf is not "
+                f"Class {cls}; see the LAANC grid for what applies at drone altitudes.")
+    elif lt in SURFACE_CLASSES or (cls in ("B", "C", "D") and p.get("TYPE_CODE") in ("CLASS", "CTR")):
+        effect = "authorization_required"
         note = f"Class {cls} controlled airspace: authorization (LAANC or FAADroneZone) needed to fly inside it."
     else:
-        effect, conf = "caution", "medium"
+        effect = "caution"
         note = f"{lt or p.get('TYPE_CODE')} (class {cls or 'n/a'}): normally above drone altitudes or advisory only."
     return rule(g, "class_airspace", p.get("GLOBAL_ID"), p.get("NAME"), effect, floor, ceil,
                 notes=join(note, "Ceiling: up to but not including 18,000 ft MSL (base of Class A)"
                            if (p.get("UPPER_DESC") or "").upper() == "AA" else None,
                            p.get("WKHR_RMK") and f"Hours: {p.get('WKHR_RMK')}"),
-                citation="14 CFR 107.41; 14 CFR Part 71", confidence=conf, source_url=url, attrs=p)
+                citation="14 CFR 107.41; 14 CFR Part 71", case=f"CLASS:{lt or p.get('TYPE_CODE') or '?'}" + (f"_{cls}" if not lt and cls else "") + (":SHELF" if shelf else ""), source_url=url, attrs=p)
 
 
 SUA_TYPES = {
@@ -340,13 +387,60 @@ SUA_TYPES = {
 
 
 def r_sua(g, p, url, layer="special_use_airspace"):
+    if not sua_is_us(p):
+        return None
+    if layer == "special_use_airspace" and p.get("TYPE_CODE") == "P":
+        return None                               # same 13 areas as the Prohibited_Areas layer
+    floor = adds_alt(p.get("LOWER_VAL"), p.get("LOWER_UOM"), p.get("LOWER_CODE"))
+    elevated = p.get("TYPE_CODE") == "R" and (floor[0] or 0) > 0
     effect, label, cite = SUA_TYPES.get(p.get("TYPE_CODE"), ("caution", f"SUA type {p.get('TYPE_CODE')}", "14 CFR Part 73"))
+    if elevated:
+        label += f". Begins at {floor[0]:,.0f} ft {floor[1] or ''}; the airspace below the floor is not part of it"
     return rule(g, layer, p.get("GLOBAL_ID"), p.get("NAME"), effect,
-                adds_alt(p.get("LOWER_VAL"), p.get("LOWER_UOM"), p.get("LOWER_CODE")),
+                floor,
                 adds_alt(p.get("UPPER_VAL"), p.get("UPPER_UOM"), p.get("UPPER_CODE"), p.get("UPPER_DESC")),
                 notes=join(label, p.get("TIMESOFUSE") and f"Times of use: {p.get('TIMESOFUSE')}",
                            p.get("CONT_AGENT") and f"Controlling agency: {p.get('CONT_AGENT')}", p.get("REMARKS")),
-                citation=cite + ("; 14 CFR 99.7" if p.get("TYPE_CODE") == "P" else ""), source_url=url, attrs=p)
+                citation=cite + ("; 14 CFR 99.7" if p.get("TYPE_CODE") == "P" else ""),
+                case=f"{'PROHIBITED' if layer == 'prohibited_areas' else 'SUA'}:{p.get('TYPE_CODE')}" + (":ELEVATED_FLOOR" if elevated else ""),
+                source_url=url, attrs=p, schedule=parse_times_of_use(p.get("TIMESOFUSE"), p.get("GMTOFFSET"), p.get("DST_CODE")))
+
+
+DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+
+
+def _days(txt):
+    if re.search(r"\bDAILY\b", txt):
+        return list(range(7))
+    out = set()
+    for a, b in re.findall(r"\b(MON|TUE|WED|THU|FRI|SAT|SUN)\s*-\s*(MON|TUE|WED|THU|FRI|SAT|SUN)\b", txt):
+        i, j = DAYS.index(a), DAYS.index(b)
+        out.update(range(i, j + 1) if i <= j else list(range(i, 7)) + list(range(0, j + 1)))
+    out.update(DAYS.index(x) for x in re.findall(r"\b(MON|TUE|WED|THU|FRI|SAT|SUN)\b(?!\s*-)", txt) if not re.search(rf"-\s*{x}\b", txt))
+    return sorted(out) or list(range(7))
+
+
+def parse_times_of_use(text, gmt_offset=None, dst=None):
+    """FAA TIMESOFUSE text -> {"type": continuous|notam|scheduled, "windows": [{"days": [0-6], "start": "HHMM",
+    "end": "HHMM"}], "other_times_notam": bool, "utc_offset": h, "dst": bool, "raw": text}. Local times.
+    SUNRISE/SUNSET are approximated as 0600/1800 ("approx_sun": true)."""
+    if not text:
+        return None
+    t = " ".join(str(text).upper().replace("%", " ").split())
+    base = {"raw": text, "utc_offset": num(gmt_offset), "dst": str(dst) == "1"}
+    if t.startswith("CONTINUOUS") or t == "H24":
+        return {**base, "type": "continuous"}
+    wins, approx = [], False
+    for seg in re.split(r";", t):
+        for a, b in re.findall(r"(\d{4}|SUNRISE|SR)\s*-\s*(\d{4}|SUNSET|SS)", seg):
+            approx |= not (a.isdigit() and b.isdigit())
+            a = a if a.isdigit() else "0600"
+            b = b if b.isdigit() else "1800"
+            wins.append({"days": _days(seg), "start": a, "end": b})
+    notam = "NOTAM" in t
+    if not wins:
+        return {**base, "type": "notam" if notam else "unparsed"}
+    return {**base, "type": "scheduled", "windows": wins, "other_times_notam": notam, "approx_sun": approx}
 
 
 def r_prohibited(g, p, url):
@@ -362,15 +456,18 @@ def r_stadium(g, p, url):
                 notes=join(f"{STADIUM_NM} NM stadium TFR. Applies only from 1 hour before to 1 hour after qualifying "
                            "events (MLB, NFL, NCAA Div. I football, major motorsport). Exact times: seams layer.",
                            join(p.get("CITY"), p.get("STATE"), sep=", "), p.get("STATUS_CODE") and f"Venue status: {p.get('STATUS_CODE')}"),
-                citation=STADIUM_CITATION, confidence="medium", source_url=url, attrs=p)
+                citation=STADIUM_CITATION, case="STADIUM:RING", source_url=url, attrs=p)
 
 
 def r_fria(g, p, url):
+    end = iso(p.get("endDate"))
+    if end and end < utc_now().strftime("%Y-%m-%dT%H:%M:%SZ"):
+        return None                               # FRIA approval has expired
     return rule(g, "fria", p.get("refNumber") or p.get("ObjectId"), p.get("title"), "allowed",
                 window=(iso(p.get("startDate")), iso(p.get("endDate"))),
                 notes=join("FAA-Recognized Identification Area: drones without Remote ID may fly here within visual line of sight.",
                            p.get("orgName"), join(p.get("city"), p.get("state"), sep=", ")),
-                citation="14 CFR 89.115(b); 14 CFR Part 89 Subpart C", source_url=url, attrs=p)
+                citation="14 CFR 89.115(b); 14 CFR Part 89 Subpart C", case="FRIA", source_url=url, attrs=p)
 
 
 def r_fixed_site(g, p, url):
@@ -380,7 +477,7 @@ def r_fixed_site(g, p, url):
                 notes=join("Recreational flyer fixed site in controlled airspace: flying allowed here under the site's "
                            f"agreement" + (f", up to {c:g} ft AGL" if c is not None else ""),
                            join(p.get("CITY"), p.get("STATE"), sep=", "), p.get("POC") and f"POC: {p.get('POC')}"),
-                citation="49 U.S.C. 44809(a)(5)", source_url=url, attrs=p)
+                citation="49 U.S.C. 44809(a)(5)", case="FIXED_SITE", source_url=url, attrs=p)
 
 
 def r_nsufr(g, p, url, layer="nsufr"):
@@ -393,7 +490,8 @@ def r_nsufr(g, p, url, layer="nsufr"):
                 notes=join(f"National security UAS flight restriction. {when}.", p.get("Base"), p.get("Branch"),
                            p.get("Reason") and f"Reason: {p.get('Reason')}", p.get("ALERTYPE"), p.get("ADVISENOTE")),
                 citation="14 CFR 99.7 (special security instructions for UAS)",
-                confidence="medium" if part_time and not win[0] else "high", source_url=url, attrs=p)
+                case=("NSUFR:PART_TIME:" + ("WINDOW" if win[0] else "NO_WINDOW")) if part_time else "NSUFR:FULL_TIME",
+                source_url=url, attrs=p)
 
 
 def r_nsufr_pt(g, p, url):
@@ -404,7 +502,7 @@ def r_nda(g, p, url):
     return rule(g, "nda_tfr", p.get("GLOBAL_ID"), p.get("NAME"), "prohibited",
                 notes=join("National Defense Airspace TFR", p.get("WKHR_RMK") and f"Active: {p.get('WKHR_RMK')}",
                            "Altitudes and times are set by the activating NOTAM (see tfr_active / notam_tfr)."),
-                citation="14 CFR 99.7; 49 U.S.C. 40103(b)(3)", confidence="medium", source_url=url, attrs=p)
+                citation="14 CFR 99.7; 49 U.S.C. 40103(b)(3)", case="NDA:BY_NOTAM", source_url=url, attrs=p)
 
 
 def r_seams(g, p, url):
@@ -414,11 +512,13 @@ def r_seams(g, p, url):
                            p.get("LEAGUE_NAME"), p.get("STATUS") and f"Status: {p.get('STATUS')}",
                            f"Active now: {'yes' if p.get('IS_ACTIVE') == 1 else 'no'}",
                            p.get("TIME_REMAINING") and f"Time remaining: {p.get('TIME_REMAINING')}"),
-                citation=STADIUM_CITATION, source_url=url, attrs=p)
+                citation=STADIUM_CITATION, case="SEAMS:EVENT", source_url=url, attrs=p)
 
 
 # ----------------------------------------------------------------------------- TFRs (tfr.faa.gov)
 
+LEGAL_CFR = {"SECURITY": "99.7", "UAS PUBLIC GATHERING": "99.7", "HAZARDS": "91.137", "VIP": "91.141",
+             "SPACE OPERATIONS": "91.143", "AIR SHOWS/SPORTS": "91.145"}
 TFR_CITES = {"91.137": "disaster/hazard area", "91.138": "disaster area in Hawaii", "91.139": "emergency air traffic rules",
              "91.141": "VIP / presidential movement", "91.143": "space operations", "91.144": "high barometric pressure",
              "91.145": "aerial demonstration or major sporting event", "99.7": "special security instructions"}
@@ -465,6 +565,37 @@ def tfr_details(ctx, notam_id, mod_time):
             "text": root.findtext(".//txtDescrTraditional")}
 
 
+def terrain_max_ft(ctx, geom, key):
+    """Highest terrain (ft MSL) under a TFR polygon: grid sample (~20 x 20) via the Open-Meteo elevation API
+    (Copernicus GLO-90 DEM). Cached per NOTAM. Returns None if the lookup fails."""
+    from shapely.geometry import shape, Point
+    cache = ctx.out / "_cache" / "terrain" / f"{key.replace('/', '_')}.json"
+    if cache.exists():
+        return json.loads(cache.read_text())["max_ft"]
+    try:
+        poly = shape(geom)
+        x0, y0, x1, y1 = poly.bounds
+        n = 20                               # ~400 grid points + ~100 boundary points (Open-Meteo counts each point)
+        pts = [(x0 + (x1 - x0) * i / (n - 1), y0 + (y1 - y0) * j / (n - 1)) for i in range(n) for j in range(n)]
+        edge = [c for part in getattr(poly, "geoms", [poly]) for c in part.exterior.coords]
+        pts = [p for p in pts if poly.contains(Point(p))] + edge[::max(1, len(edge) // 100)]
+        top = None
+        for k in range(0, len(pts), 100):
+            chunk = pts[k:k + 100]
+            r = http_get("https://api.open-meteo.com/v1/elevation", {"latitude": ",".join(f"{p[1]:.5f}" for p in chunk),
+                         "longitude": ",".join(f"{p[0]:.5f}" for p in chunk)}, as_json=True)
+            vals = [v for v in r.get("elevation", []) if v is not None]
+            if vals:
+                top = max(top or -1e9, max(vals) * 3.28084)
+        if top is None:
+            return None
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"max_ft": top, "samples": len(pts)}))
+        return top
+    except Exception:
+        return None
+
+
 def fmt_alt(a):
     v, ref = a
     if ref == "UNL":
@@ -489,11 +620,11 @@ def src_tfr(ctx):
         p, g = f.get("properties") or {}, f.get("geometry")
         nid = (p.get("NOTAM_KEY") or "").split("-")[0]
         shaped.add(nid)
-        if not g or not in_bbox(g, ctx.bbox):
+        if not g or not in_bbox(g, ctx.bbox) or nid in EXCLUDE_NOTAMS:
             continue
         d = tfr_details(ctx, nid, mods.get(nid) or p.get("LAST_MODIFICATION_DATETIME") or "x")
         floor = ceiling = (None, None)
-        notes, conf, code = [p.get("TITLE"), f"Type: {p.get('LEGAL')}"], "low", None
+        notes, code = [p.get("TITLE"), f"Type: {p.get('LEGAL')}"], None
         window = (None, None)
         if d:
             no_areas = not d["areas"]
@@ -502,12 +633,12 @@ def src_tfr(ctx):
             if not no_areas:
                 floors = [a["floor"] for a in d["areas"] if a["floor"][0] is not None]
                 ceils = [a["ceiling"] for a in d["areas"] if a["ceiling"][0] is not None or a["ceiling"][1] == "UNL"]
+                floors = [(0.0, "AGL") if a[0] == 0 and a[1] in ("MSL", "FL") else a for a in floors]   # 0 MSL = surface
                 floor = min(floors, key=lambda a: (a[1] != "AGL", a[0])) if floors else (None, None)
                 ceiling = max(ceils, key=lambda a: float("inf") if a[1] == "UNL" else a[0]) if ceils else (None, None)
                 if len(d["areas"]) > 1:
                     notes.append(f"{len(d['areas'])} areas (shape not matched to area; floor/ceiling = overall range): "
                                  + ", ".join(f"{a['name']}: {fmt_alt(a['floor'])}-{fmt_alt(a['ceiling'])}" for a in d["areas"]))
-                conf = "high" if len(d["areas"]) == 1 else "medium"
             if d["end"] is None:
                 notes.append("Until further notice.")
             if d["text"]:
@@ -516,11 +647,24 @@ def src_tfr(ctx):
             no_detail += 1
         # drones fly below 400 ft AGL: a TFR whose lowest floor is well above that is caution-only
         effect = "caution" if floor[1] == "AGL" and (floor[0] or 0) > 400 else "prohibited"
-        if floor[1] in ("MSL", "FL") and conf == "high":
-            conf = "medium"          # MSL floor: whether it reaches the ground depends on terrain
+        case = ("TFR:NO_DETAILS" if not d else "TFR:FLOOR_ABOVE_400_AGL" if effect == "caution"
+                else "TFR:FLOOR_MSL" if floor[1] in ("MSL", "FL") else "TFR:FLOOR_NEAR_SURFACE")
+        if case == "TFR:FLOOR_MSL":
+            top = terrain_max_ft(ctx, g, nid)
+            if top is None:
+                case = "TFR:FLOOR_MSL:TERRAIN_UNCHECKED"
+            else:
+                clear = floor[0] - top
+                notes.append(f"Terrain check: highest ground under the TFR is about {top:,.0f} ft MSL; the floor is "
+                             f"{clear:,.0f} ft above it")
+                if clear <= 400:
+                    case = "TFR:FLOOR_MSL:NEAR_TERRAIN"
+        if d and len(d["areas"]) > 1:
+            case += ":MULTI_AREA"
+        code = LEGAL_CFR.get((p.get("LEGAL") or "").upper(), code)      # citation follows the TFR category
         cite = f"14 CFR {code}" + (f" ({TFR_CITES[code]})" if code in TFR_CITES else "") if code else None
         out.append(rule(g, "tfr_active", p.get("NOTAM_KEY") or nid, p.get("TITLE"), effect, floor, ceiling, window,
-                        notes=join(*notes), citation=cite, confidence=conf,
+                        notes=join(*notes), citation=cite, case=case,
                         source_url=f"{TFR_BASE}/tfr3/?page=detail_{nid.replace('/', '_')}", attrs=p))
     missing = [n for n in mods if n not in shaped]
     ctx.message = join(f"{len(missing)} TFRs nationwide have no published shape ({', '.join(missing[:10])})" if missing else None,
@@ -604,7 +748,7 @@ def src_notams(ctx):
                             (iso(n.get("effectiveStart")), None if (end or "").upper().startswith("PERM") else iso(end)),
                             notes=join(f"TFR NOTAM: {kind[1]}. Floor/ceiling are the NOTAM Q-line flight levels (coarse); read text.",
                                        text[:1500]),
-                            citation=f"14 CFR {kind[0]} ({kind[1]})", confidence=conf, source_url=NOTAM_API,
+                            citation=f"14 CFR {kind[0]} ({kind[1]})", case=f"NOTAM:{kind[0]}:{'POLYGON' if conf == 'medium' else 'RADIUS'}", source_url=NOTAM_API,
                             attrs={k: v for k, v in n.items() if k != "text"}))
         total_pages = int(data.get("totalPages") or 1)
         if page >= total_pages or not data.get("items"):
@@ -613,6 +757,64 @@ def src_notams(ctx):
     ctx.last_edit = last
     ctx.message = f"{no_geom} matching TFR NOTAMs had no geometry" if no_geom else None
     yield out
+
+
+# ----------------------------------------------------------------------------- DC FRZ (14 CFR 93.335)
+
+def _dms(d, m, s_, hemi):
+    v = d + m / 60 + s_ / 3600
+    return -v if hemi in "SW" else v
+
+
+DCA = (_dms(77, 2, 11, "W"), _dms(38, 51, 34, "N"))          # Washington VOR/DME (DCA), per 93.335
+
+
+def _bearing(a, b):
+    lon1, lat1, lon2, lat2 = map(math.radians, (*a, *b))
+    y = math.sin(lon2 - lon1) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(lon2 - lon1)
+    return math.degrees(math.atan2(y, x)) % 360
+
+
+def _dest(c, brg, nm):
+    R_, d, b = 6371008.8, nm * METERS_PER_NM / 6371008.8, math.radians(brg)
+    lat1, lon1 = math.radians(c[1]), math.radians(c[0])
+    lat2 = math.asin(math.sin(lat1) * math.cos(d) + math.cos(lat1) * math.sin(d) * math.cos(b))
+    lon2 = lon1 + math.atan2(math.sin(b) * math.sin(d) * math.cos(lat1), math.cos(d) - math.sin(lat1) * math.sin(lat2))
+    return (math.degrees(lon2), math.degrees(lat2))
+
+
+def _arc(c, a, b, nm, step=2.0):
+    """Clockwise arc around c from point a to point b (true bearings computed from the given points)."""
+    b0, b1 = _bearing(c, a), _bearing(c, b)
+    span = (b1 - b0) % 360
+    n = max(2, int(span / step))
+    return [_dest(c, b0 + span * i / n, nm) for i in range(n + 1)]
+
+
+def src_dc_frz(ctx):
+    from shapely.geometry import Polygon, Point
+    p1 = (_dms(77, 18, 30, "W"), _dms(38, 59, 31, "N"))    # DCA 311 deg / 15 NM
+    p2 = (_dms(77, 4, 32, "W"), _dms(39, 6, 28, "N"))      # DCA 002 deg / 15 NM
+    p3 = (_dms(76, 50, 38, "W"), _dms(39, 2, 18, "N"))     # DCA 049 deg / 14 NM
+    p4 = (_dms(76, 48, 32, "W"), _dms(38, 59, 1, "N"))     # DCA 064 deg / 13 NM
+    p5 = (_dms(77, 18, 48, "W"), _dms(38, 50, 53, "N"))    # DCA 276 deg / 13 NM
+    ring = _arc(DCA, p1, p2, 15) + [p3] + _arc(DCA, p4, p5, 13) + [p1]
+    frz = Polygon(ring)
+    # No Freeway Airport (W00) cutout (final review 2026-10-06): 93.335 excludes it for manned aircraft,
+    # but the drone ban (99.7) is not confirmed to exclude it.
+    note = "Exact boundary from 14 CFR 93.335 (DCA 15 NM / 13 NM arcs and connecting lines)"
+    ctx.source, ctx.last_edit = "https://www.ecfr.gov/current/title-14/section-93.335", None
+    g = frz.__geo_interface__
+    if ctx.bbox and not in_bbox(g, ctx.bbox):
+        yield []
+        return
+    yield [rule({"type": g["type"], "coordinates": g["coordinates"]}, "dc_frz", "DC_FRZ",
+                "Washington, DC Flight Restricted Zone (FRZ)", "prohibited", (0.0, "AGL"), (18000.0, "MSL"),
+                notes=join("Drone flight in the DC FRZ is not allowed without FAA/TSA authorization",
+                           "The surrounding DC SFRA ring (15-30 NM) is open to recreational and Part 107 flyers who follow its rules",
+                           note, "Ceiling: up to but not including FL180"),
+                citation="14 CFR 93.339; 14 CFR 93.335", case="DC_FRZ", source_url=ctx.source)]
 
 
 # ----------------------------------------------------------------------------- layer registry
@@ -630,6 +832,7 @@ LAYERS = {   # name: (group, source)
     "class_airspace": ("weekly", arcgis_source("Class_Airspace", r_class, page_size=250)),
     "special_use_airspace": ("weekly", arcgis_source("Special_Use_Airspace", r_sua)),
     "prohibited_areas": ("weekly", arcgis_source("Prohibited_Areas", r_prohibited)),
+    "dc_frz": ("weekly", src_dc_frz),
     "stadiums_3nm": ("weekly", arcgis_source("Stadiums", r_stadium)),
     "fria": ("weekly", arcgis_source("FAA_Recognized_Identification_Areas", r_fria)),
     "recreational_fixed_sites": ("weekly", arcgis_source("Recreational_Flyer_Fixed_Sites", r_fixed_site)),
@@ -799,6 +1002,32 @@ def run_layer(name, group, source, out, bbox, want_geojson, main_gpkg, lock):
     return row
 
 
+def renormalize(out, names, lock):
+    """Re-apply the labeling rules (and rule_decisions.json) to an existing GeoPackage, using the
+    FAA fields stored in source_attrs. No download. TFR/NOTAM layers need --group fast instead."""
+    gpkg = out / "uas_rules.gpkg"
+    have = {n for n, _ in pyogrio.list_layers(gpkg)} if gpkg.exists() else set()
+    for name in names:
+        to_rule = getattr(LAYERS[name][1], "to_rule", None)
+        if not to_rule or name not in have:
+            print(f"{name:<26}skipped" + ("" if to_rule else " (re-download with --group fast)"))
+            continue
+        g = gpd.read_file(gpkg, layer=name)
+        writer, batch = LayerWriter(out, name, False), []
+        for row in g.itertuples(index=False):
+            geom = row.geometry.centroid if name == "stadiums_3nm" else row.geometry
+            f = to_rule(geom.__geo_interface__, json.loads(row.source_attrs or "{}"), row.source_url)
+            if f:
+                f["properties"].update(source_last_edit=row.source_last_edit, fetched_utc=row.fetched_utc)
+                batch.append(f)
+            if len(batch) >= 5000:
+                writer.write(batch, {}); batch = []
+        writer.write(batch, {})
+        writer.commit(gpkg, lock)
+        print(f"{name:<26}relabeled {writer.count:>8}")
+    shutil.rmtree(staging_dir(out), ignore_errors=True)
+
+
 def parse_bbox(s):
     try:
         b = [float(x) for x in s.split(",")]
@@ -822,6 +1051,8 @@ def main(argv=None):
     ap.add_argument("--layers", help="comma-separated layer names (overrides --group)")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "out"), help="output folder")
     ap.add_argument("--geojson", action="store_true", help="also write GeoJSON when geopandas is installed")
+    ap.add_argument("--renormalize", action="store_true",
+                    help="re-label the existing GeoPackage with current rules/decisions (no download)")
     args = ap.parse_args(argv)
 
     if args.layers:
@@ -839,6 +1070,12 @@ def main(argv=None):
     if not HAVE_GPD:
         print("geopandas not installed: writing GeoJSON only (out/geojson/), no GeoPackage.\n")
     print(f"Area: {'bbox ' + ','.join(map(str, args.bbox)) if args.bbox else 'whole US'}   Layers: {len(names)}\n")
+
+    if args.renormalize:
+        if not HAVE_GPD:
+            sys.exit("--renormalize needs geopandas")
+        renormalize(out, names, lock)
+        return 0
 
     rows = []
     for name in names:

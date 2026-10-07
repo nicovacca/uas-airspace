@@ -11,3 +11,16 @@ __pycache__/
 
 # Office temp files
 ~$*
+
+# full-US output
+out_full/
+v2_full/data/
+*.log
+
+# deploy bundle copy of v2_full
+deploy/site/
+
+# local caches, old NY build, logs
+_cache/
+v2_ny/
+*.log

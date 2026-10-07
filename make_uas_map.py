@@ -41,8 +41,8 @@ def clean(v):
     return v
 
 
-def rnd(c):
-    return [round(c[0], 5), round(c[1], 5)] if isinstance(c[0], (int, float)) else [rnd(x) for x in c]
+def rnd(c, nd=5):
+    return [round(c[0], nd), round(c[1], nd)] if isinstance(c[0], (int, float)) else [rnd(x, nd) for x in c]
 
 
 def fields_from(raw):
@@ -73,7 +73,9 @@ def dissolve_laanc(g):
     return d.drop(columns=["_apt", "_n", "_f"])
 
 
-def load_layers(gpkg):
+def load_layers(gpkg, simplify=None, precision=5):
+    """simplify: per-layer tolerance overrides (degrees); precision: coordinate decimals."""
+    tols = {**SIMPLIFY, **(simplify or {})}
     have = {name for name, _ in pyogrio.list_layers(gpkg)}
     data = {}
     for name in LAYER_ORDER:
@@ -85,7 +87,7 @@ def load_layers(gpkg):
             continue
         if name == "laanc_grid":
             g = dissolve_laanc(g)
-        tol = SIMPLIFY.get(name, 2e-5)
+        tol = tols.get(name, tols.get("*", 2e-5))
         if tol:
             g["geometry"] = g.geometry.simplify(tol, preserve_topology=True)
         g = g[~g.geometry.is_empty & g.geometry.notna()]
@@ -95,7 +97,7 @@ def load_layers(gpkg):
             p["fields"] = fields_from(getattr(row, "source_attrs", None))
             geom = row.geometry.__geo_interface__
             feats.append({"type": "Feature", "properties": p,
-                          "geometry": {"type": geom["type"], "coordinates": rnd(geom["coordinates"])}})
+                          "geometry": {"type": geom["type"], "coordinates": rnd(geom["coordinates"], precision)}})
         data[name] = feats
         print(f"  {name:<26}{len(feats):>6} shapes")
     return data
@@ -479,7 +481,6 @@ function card(layer, p) {
         : esc(altText(p))}</dd>
       <dt>When</dt><dd>${when}${st.k !== "perm" && layer !== "stadiums_3nm" ? `<span class="st ${st.k}">${esc(st.label)}</span>` : ""}</dd>
       <dt>Rule</dt><dd>${esc(p.citation || "—")}</dd>
-      <dt>Confidence</dt><dd>${esc(p.confidence || "—")}</dd>
       <dt>Source</dt><dd>${p.source_url && p.source_url.includes("tfr.faa.gov") ? `<a href="${esc(p.source_url)}" target="_blank">tfr.faa.gov</a>` : "FAA"} · updated ${esc(fmtDate(p.source_last_edit) || "—")}</dd>
     </dl>
     ${notes ? (notes.length < 220 ? `<details open><summary>Notes</summary><p>${esc(notes)}</p></details>`
