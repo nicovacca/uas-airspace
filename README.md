@@ -34,7 +34,18 @@ A map of U.S. drone rules from public FAA data. Click anywhere on the map to see
 
 ---
 
-## Publish it on Posit Connect (password protected)
+## Publish it on Posit Connect Cloud (connect.posit.cloud)
+
+1. Sign in at **connect.posit.cloud** with GitHub.
+2. Click **Publish** > **Streamlit**, pick this repository and the **main** branch.
+3. Primary file: **`streamlit_map.py`**. Dependencies: **`requirements.txt`**.
+4. Open **Advanced settings** > **Add variable**: name `MAP_PASSWORD`, value = the password viewers will type.
+5. Click **Publish**. Share the link and the password.
+
+Every push to the repository republishes it automatically.
+The free plan only publishes from a **public** repository; a private repository needs a paid plan.
+
+## Publish it on Posit Connect (company server, password protected)
 
 It is published as a **Streamlit** app: a password screen, then the map. Viewers pick states in the sidebar. The built map is already in this repository, so no download is needed to publish it.
 
