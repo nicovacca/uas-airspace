@@ -81,7 +81,9 @@
   .grp.open .chev { transform:rotate(90deg); }
   .subs { display:none; padding:0 18px 12px 30px; }
   .grp.open .subs { display:block; }
-  .srow { display:flex; align-items:center; gap:10px; padding:7px 0; font-size:13.5px; }
+  .srow { display:flex; align-items:center; gap:10px; padding:7px 4px; font-size:13.5px; cursor:pointer; border-radius:6px; }
+  .srow:hover { background:#2c2d33; }
+  .gt { cursor:pointer; }
   .srow .st { flex:1; }
   .srow .ct { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
   .srow .hint { display:block; color:var(--muted); font-size:11.5px; }
@@ -457,12 +459,12 @@ function renderLayerList() {
     <div class="grow"><label class="tg"><input type="checkbox" data-group="${g}" ${gstate[g] ? "checked" : ""}><span></span></label>
       <span class="gt">${title}</span><button class="chev">›</button></div>
     <div class="subs">${SUB.filter(d => d.g === g).map(d => `
-      <div class="srow"><label class="tg sm"><input type="checkbox" data-sub="${d.id}" ${state[d.id] ? "checked" : ""}><span></span></label>
+      <label class="srow"><span class="tg sm"><input type="checkbox" data-sub="${d.id}" ${state[d.id] ? "checked" : ""}><span></span></span>
         ${swatch(d)}<span class="st">${esc(d.title)}<span class="hint">${esc(d.hint)}</span><span class="hint">Source: ${srcLink(d.src)}</span>
         ${d.ramp ? `<span class="ramp">${LAANC.map(([v, c, t]) => `<i style="background:${c}">${t}</i>`).join("")}</span>` : ""}</span>
-        <span class="ct">${(FEATS[d.id] || []).length.toLocaleString()}</span></div>`).join("")}
+        <span class="ct">${(FEATS[d.id] || []).length.toLocaleString()}</span></label>`).join("")}
     </div></div>`).join("") + footHtml();
-  list.querySelectorAll(".chev").forEach(b => b.onclick = () => b.closest(".grp").classList.toggle("open"));
+  list.querySelectorAll(".chev, .gt").forEach(b => b.onclick = () => b.closest(".grp").classList.toggle("open"));
   list.querySelectorAll("[data-group]").forEach(cb => cb.onchange = () => { gstate[cb.dataset.group] = cb.checked; apply(); });
   list.querySelectorAll("[data-sub]").forEach(cb => cb.onchange = () => { state[cb.dataset.sub] = cb.checked; apply(); });
 }
