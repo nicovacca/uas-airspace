@@ -72,12 +72,17 @@ def state_bbox(geom):
 
 
 def fetch_airports():
+    """All open FAA airports. Each page is retried (rate limits / timeouts); the total is checked against
+    the server's count so a cut-short download fails loudly instead of silently dropping airports."""
+    import build_uas_layers as bul
     url, out, offset = f"{FAA}/US_Airport/FeatureServer/0/query", [], 0
+    where = "OPERSTATUS IS NULL OR OPERSTATUS <> 'CLOSED'"
+    expected = bul.get_json(url, {"where": where, "returnCountOnly": "true", "f": "json"})["count"]
     while True:
-        r = requests.get(url, timeout=120, params={
-            "where": "OPERSTATUS IS NULL OR OPERSTATUS <> 'CLOSED'",
+        r = bul.get_json(url, {
+            "where": where,
             "outFields": "IDENT,ICAO_ID,NAME,TYPE_CODE,PRIVATEUSE,MIL_CODE,SERVCITY,STATE,ELEVATION",
-            "outSR": 4326, "f": "json", "resultOffset": offset, "resultRecordCount": 1000}).json()
+            "outSR": 4326, "f": "json", "resultOffset": offset, "resultRecordCount": 1000})
         feats = r.get("features") or []
         for f in feats:
             a, g = f["attributes"], f.get("geometry") or {}
@@ -86,9 +91,11 @@ def fetch_airports():
                             "name": a.get("NAME"), "type": a.get("TYPE_CODE"), "private": a.get("PRIVATEUSE") == 1,
                             "mil": a.get("MIL_CODE"), "city": a.get("SERVCITY"), "state": a.get("STATE"),
                             "elev": a.get("ELEVATION")})
-        if not feats or not r.get("exceededTransferLimit"):
+        if not feats or (not r.get("exceededTransferLimit") and offset + len(feats) >= expected):
             break
         offset += len(feats)
+    if len(out) < expected * 0.99:
+        raise SystemExit(f"Airport download incomplete ({len(out)} of {expected}); run again.")
     return out
 
 

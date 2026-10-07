@@ -476,7 +476,7 @@ def r_fixed_site(g, p, url):
                 (0.0, "AGL"), (c, "AGL" if c is not None else None),
                 notes=join("Recreational flyer fixed site in controlled airspace: flying allowed here under the site's "
                            f"agreement" + (f", up to {c:g} ft AGL" if c is not None else ""),
-                           join(p.get("CITY"), p.get("STATE"), sep=", "), p.get("POC") and f"POC: {p.get('POC')}"),
+                           join(p.get("CITY"), p.get("STATE"), sep=", ")),
                 citation="49 U.S.C. 44809(a)(5)", case="FIXED_SITE", source_url=url, attrs=p)
 
 

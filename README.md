@@ -34,6 +34,23 @@ A map of U.S. drone rules from public FAA data. Click anywhere on the map to see
 
 ---
 
+## Publish it on Posit Connect (password protected)
+
+The built map is already in this repository, so no download is needed to publish it.
+
+1. Install Python (see step 1 above).
+2. Double-click **`DEPLOY_TO_CONNECT.bat`** and answer three questions:
+   - your Posit Connect address, for example `https://connect.yourcompany.com`
+   - a Connect **API key** (in Connect: click your name, top right, then **API Keys**; you need Publisher rights)
+   - the **password** people will type to open the map
+3. In Connect, open **Drone Airspace Map**, go to **Settings > Access**, and choose **Anyone - no login required**. The password page protects it.
+
+To change the password later: Connect > the app > **Settings > Vars** > `MAP_PASSWORD`.
+To publish newer data: refresh it with `RUN_MAP.bat` (or pull the latest version of this repository), then run `DEPLOY_TO_CONNECT.bat` again.
+The Refresh buttons do not work on the hosted copy; the data age bar still shows how old it is.
+
+---
+
 ## For advanced users
 
 Same steps as commands (PowerShell, from this folder):

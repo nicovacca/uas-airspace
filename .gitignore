@@ -14,7 +14,6 @@ __pycache__/
 
 # full-US output
 out_full/
-v2_full/data/
 *.log
 
 # deploy bundle copy of v2_full

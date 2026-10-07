@@ -52,7 +52,7 @@ def fields_from(raw):
         return {}
     out = {}
     for k, v in d.items():
-        if v in (None, "", " ") or k.startswith("Shape__"):
+        if v in (None, "", " ") or k.startswith("Shape__") or k.upper() == "POC":   # POC = named people's contacts
             continue
         if isinstance(v, (int, float)) and DATE_KEY.search(k) and 9e11 < v < 4.2e12:
             v = pd.Timestamp(v, unit="ms", tz="UTC").strftime("%Y-%m-%d %H:%M UTC")
