@@ -77,7 +77,7 @@ python -m venv .venv
 
 | Task | Command |
 |---|---|
-| Try the Streamlit (hosted) version locally | `$env:MAP_PASSWORD='test'; .venv\Scripts\streamlit run streamlit_apppp.py` |
+| Try the Streamlit (hosted) version locally | `$env:MAP_PASSWORD='test'; .venv\Scripts\streamlit run streamlit_app\app.py` |
 | Open the map with working Refresh buttons | `.venv\Scripts\python serve_map.py` (serves the map at http://127.0.0.1:8765) |
 | Refresh only TFRs and stadium events (fast) | `.venv\Scripts\python build_uas_layers.py --out out_full --group fast`, then `make_v2_full.py` |
 | Add OpenStreetMap infrastructure (NY, KY, VA) | `.venv\Scripts\python osm_infra_pull.py` (add `--resume` if a step failed), then `make_v2_full.py` |
