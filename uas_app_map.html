@@ -35,6 +35,15 @@
                align-items:center; font-size:17px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.45); }
   #layersBtn:hover { background:#5a5c64; }
   #layersBtn svg { width:22px; height:22px; }
+  #ageBar { position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:650; display:flex; gap:8px; align-items:center;
+            background:rgba(38,39,43,.96); border:1px solid #3a3b41; border-radius:22px; padding:6px 8px 6px 16px; font-size:13px;
+            box-shadow:0 3px 12px rgba(0,0,0,.5); max-width:calc(100% - 260px); }
+  #ageBar.stale { border-color:#c98a00; } #ageBar.busy { border-color:#2ea8ff; }
+  #ageTxt { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #ageBar .ab { background:#2ea8ff; color:#04121f; border:0; border-radius:14px; padding:5px 11px; font-weight:700; font-size:12px; cursor:pointer; white-space:nowrap; }
+  #ageBar .ab[data-scope=all] { background:#3a3c43; color:#eceef3; }
+  #ageBar .ab:disabled { opacity:.45; cursor:default; }
+  #ageBar .abx { background:none; border:0; color:#9a9ca6; font-size:15px; cursor:pointer; padding:0 6px; }
   #coords { position:absolute; left:0; bottom:0; z-index:500; font-size:11px; color:#c9cbd2; background:rgba(29,29,32,.8);
             padding:2px 8px; border-top-right-radius:6px; font-variant-numeric:tabular-nums; }
 
@@ -158,7 +167,7 @@
 
 <div id="rightcol">
   <button class="fab" id="statusFab" title="Open briefing"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
-  <button class="fab" id="resetFab" title="Reset view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg></button>
+  <button class="fab" id="resetFab" title="Reset view (zoom back to the selected states)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
   <button class="fab" id="pinFab" title="Brief map center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></button>
 </div>
 
@@ -169,6 +178,10 @@
   <button id="layersBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>Layers</button>
 </div>
 <div id="coords"></div>
+<div id="ageBar" style="display:none"><span id="ageTxt"></span>
+  <button class="ab" data-scope="fast" title="TFRs and stadium events, a few minutes">Refresh TFRs</button>
+  <button class="ab" data-scope="all" title="Every FAA layer, about 30 minutes">Refresh all</button>
+  <button class="abx" id="ageX" title="Hide">✕</button></div>
 <div id="loading"></div>
 
 <aside class="drawer" id="layersDrawer">
@@ -619,6 +632,54 @@ const updateWx = async () => { const c = await weather(map.getCenter()); if (c) 
   document.getElementById("wx").title = `Map center: ${Math.round(c.temperature_2m)}°F, wind ${Math.round(c.wind_speed_10m)} mph, gusts ${Math.round(c.wind_gusts_10m)} mph`; } };
 map.on("moveend", () => { clearTimeout(wxTimer); wxTimer = setTimeout(updateWx, 700); });
 updateWx();
+
+
+// ------------------------------------------------------------------ data age bar + refresh (works when opened through serve_map.py)
+function ago(iso) {
+  if (!iso) return "unknown";
+  const m = Math.round((Date.now() - Date.parse(iso)) / 6e4);
+  if (m < 60) return m + " min ago"; const hr = Math.round(m / 60);
+  return hr < 48 ? hr + " h ago" : Math.round(hr / 24) + " days ago";
+}
+function renderAge() {
+  const rows = (META.manifest || []).filter(r => r.status === "ok" && r.fetched_utc);
+  if (!rows.length) return;
+  const fast = rows.filter(r => ["tfr_active", "seams"].includes(r.layer)).map(r => r.fetched_utc).sort().pop();
+  const rest = rows.filter(r => !["tfr_active", "seams", "notam_tfr"].includes(r.layer)).map(r => r.fetched_utc).sort()[0];
+  const key = "uas_agebar_hidden_" + (fast || "") + (rest || "");
+  const bar = document.getElementById("ageBar");
+  if (sessionStorage.getItem(key)) return;
+  document.getElementById("ageTxt").textContent = `FAA data: TFRs & stadium events ${ago(fast)} · other layers ${ago(rest)}`;
+  bar.classList.toggle("stale", Date.now() - Date.parse(fast) > 6 * 3600e3);
+  bar.style.display = "flex";
+  document.getElementById("ageX").onclick = () => { sessionStorage.setItem(key, "1"); bar.style.display = "none"; };
+}
+const canRefresh = fetch("api/status", { cache:"no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+async function pollRefresh() {
+  const bar = document.getElementById("ageBar"), txt = document.getElementById("ageTxt");
+  bar.classList.add("busy"); bar.style.display = "flex";
+  document.querySelectorAll("#ageBar .ab").forEach(b => b.disabled = true);
+  for (;;) {
+    const s = await fetch("api/status", { cache:"no-store" }).then(r => r.json()).catch(() => null);
+    if (!s) { txt.textContent = "Lost contact with the map launcher. Is the RUN_MAP window still open?"; return; }
+    const last = (s.log || []).slice(-1)[0] || "";
+    if (s.running) { txt.textContent = `Refreshing: ${s.step}${last ? " · " + last.slice(0, 70) : ""}`; await new Promise(r => setTimeout(r, 2000)); continue; }
+    if (s.ok) { txt.textContent = "Refresh done. Reloading the map…"; setTimeout(() => location.reload(), 800); }
+    else { txt.textContent = "Refresh failed: " + last; document.querySelectorAll("#ageBar .ab").forEach(b => b.disabled = false); bar.classList.remove("busy"); }
+    return;
+  }
+}
+document.querySelectorAll("#ageBar .ab").forEach(b => b.onclick = async () => {
+  if (!(await canRefresh)) {
+    document.getElementById("ageTxt").textContent = "This feature is not able to be rendered without a local server hosting this website";
+    return;
+  }
+  if (b.dataset.scope === "all" && !confirm("Refresh every FAA layer? This takes about 30 minutes. You can keep using the map meanwhile.")) return;
+  const r = await fetch("api/refresh?scope=" + b.dataset.scope, { method:"POST", headers:{ "X-Map-Refresh":"1" } });
+  if (r.ok || r.status === 409) pollRefresh();
+});
+renderAge();
+canRefresh.then(s => { if (s && s.running) pollRefresh(); });
 
 // ------------------------------------------------------------------ hit testing
 function gbbox(g) { let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;

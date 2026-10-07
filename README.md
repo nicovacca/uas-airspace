@@ -15,16 +15,20 @@ A map of U.S. drone rules from public FAA data. Click anywhere on the map to see
 
 **3. Double-click `RUN_MAP.bat`**
 
-- A black window opens. Leave it open.
-- The first run sets things up, then downloads the FAA data. **This takes about 30 minutes.**
-- When it's done, the map opens in your browser.
+- A black window opens. **Keep it open while you use the map** (it powers the Refresh buttons).
+- The first time, it sets things up and downloads the FAA data. **This takes about 30 minutes.**
+- Then the map opens in your browser. Next time it opens right away.
 
 **4. Use the map**
 
 - Click **Layers** (bottom left) and tick a state, for example **New York**.
 - Click anywhere on the map to see the rules for that spot.
 
-Next time, just open **`v2_full\index.html`**. Double-click `RUN_MAP.bat` again whenever you want fresh data.
+**5. Update the data**
+
+- The bar at the top of the map shows how old the FAA data is.
+- Click **Refresh TFRs** (a few minutes) or **Refresh all** (about 30 minutes). The map reloads by itself when done.
+- This only works when the map was opened with `RUN_MAP.bat`. Opening `index.html` directly shows the map, but not the refresh.
 
 **If something goes wrong:** take a screenshot of the black window and send it to whoever gave you the map.
 
@@ -39,11 +43,12 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 .venv\Scripts\python build_uas_layers.py --out out_full
 .venv\Scripts\python make_v2_full.py
-start v2_full\index.html
+.venv\Scripts\python serve_map.py
 ```
 
 | Task | Command |
 |---|---|
+| Open the map with working Refresh buttons | `.venv\Scripts\python serve_map.py` (serves the map at http://127.0.0.1:8765) |
 | Refresh only TFRs and stadium events (fast) | `.venv\Scripts\python build_uas_layers.py --out out_full --group fast`, then `make_v2_full.py` |
 | Add OpenStreetMap infrastructure (NY, KY, VA) | `.venv\Scripts\python osm_infra_pull.py` (add `--resume` if a step failed), then `make_v2_full.py` |
 | Review the labeling rules | `.venv\Scripts\python make_rule_review.py`, open `review\rule_review.html`, export `rule_decisions.json` into this folder, then `build_uas_layers.py --out out_full --renormalize` and `make_v2_full.py` |

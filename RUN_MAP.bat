@@ -1,5 +1,5 @@
 @echo off
-rem Double-click this file to set up, download the FAA data, build the map and open it.
+rem Double-click this file to open the map. The first time it also sets up and downloads the FAA data.
 cd /d "%~dp0"
 title Drone Airspace Map
 echo.
@@ -30,21 +30,31 @@ if not exist ".venv\Scripts\python.exe" (
 set AREA=
 if /i "%~1"=="--test" set AREA=--bbox=-74.1,40.6,-73.8,40.9
 
-echo  [2/4] Downloading FAA drone data for the whole U.S. This takes about 30 minutes.
+if exist "out_full\uas_rules.gpkg" goto :have_data
+echo  [2/4] Downloading FAA drone data for the whole U.S. This takes about 30 minutes, first time only.
 echo        Leave this window open. "rate-limited, waiting 60s" messages are normal.
 ".venv\Scripts\python" build_uas_layers.py --out out_full %AREA%
 if errorlevel 1 echo  Note: a few layers could not be downloaded. The map will still be built with the rest.
+goto :build
 
+:have_data
+echo  [2/4] FAA data already downloaded. Use the Refresh buttons at the top of the map to update it.
+
+:build
+if exist "v2_full\data\states.js" if exist "out_full\uas_rules.gpkg" if not "%~1"=="--test" goto :open
 echo  [3/4] Building the map...
 ".venv\Scripts\python" make_v2_full.py || goto :fail
 
-echo  [4/4] Opening the map in your browser...
-if not "%NO_OPEN%"=="1" start "" "%~dp0v2_full\index.html"
+:open
+echo  [4/4] Opening the map in your browser.
 echo.
-echo  Done. Next time you can just open v2_full\index.html,
-echo  or double-click RUN_MAP.bat again to get fresh data.
+echo  KEEP THIS WINDOW OPEN while you use the map - it powers the Refresh buttons.
+echo  Close this window when you are done.
 echo.
-pause
+if "%NO_SERVE%"=="1" exit /b 0
+set BROWSER_FLAG=
+if "%NO_OPEN%"=="1" set BROWSER_FLAG=--no-browser
+".venv\Scripts\python" serve_map.py %BROWSER_FLAG% || goto :fail
 exit /b 0
 
 :fail
