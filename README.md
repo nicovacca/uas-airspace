@@ -54,8 +54,10 @@ python3 -m venv .venv
 .venv/bin/python -m pip install rsconnect-python
 .venv/bin/python deploy/build_site.py streamlit_app
 export MAP_PASSWORD='the password'
-.venv/bin/rsconnect deploy streamlit streamlit_app --entrypoint app.py --title "Drone Airspace Map" -E MAP_PASSWORD \n  --server https://YOUR-CONNECT-URL --api-key YOUR-API-KEY
+.venv/bin/rsconnect deploy streamlit streamlit_app --entrypoint app.py --title "Drone Airspace Map" -E MAP_PASSWORD \
+  --server https://YOUR-CONNECT-URL --api-key YOUR-API-KEY
 ```
+
 To publish newer data: refresh it with `RUN_MAP.bat` (or pull the latest version of this repository), then run `DEPLOY_TO_CONNECT.bat` again.
 The Refresh buttons do not work on the hosted copy; the data age bar still shows how old it is.
 
@@ -80,7 +82,7 @@ python -m venv .venv
 | Refresh only TFRs and stadium events (fast) | `.venv\Scripts\python build_uas_layers.py --out out_full --group fast`, then `make_v2_full.py` |
 | Add OpenStreetMap infrastructure (NY, KY, VA) | `.venv\Scripts\python osm_infra_pull.py` (add `--resume` if a step failed), then `make_v2_full.py` |
 | Review the labeling rules | `.venv\Scripts\python make_rule_review.py`, open `review\rule_review.html`, export `rule_decisions.json` into this folder, then `build_uas_layers.py --out out_full --renormalize` and `make_v2_full.py` |
-| Publish to Posit Connect with a password | see `deploy\app.py` (password in the `MAP_PASSWORD` setting on Connect, never in code) |
+| Publish the Flask version instead of Streamlit | `deploy\build_site.py`, then `rsconnect deploy flask deploy --entrypoint app:app -E MAP_PASSWORD ...` |
 
 Data: FAA UAS Data Delivery System, FAA SEAMS, tfr.faa.gov, OpenStreetMap (© OpenStreetMap contributors).
 Reference only: check B4UFLY or LAANC before flying.
