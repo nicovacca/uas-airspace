@@ -36,7 +36,7 @@ A map of U.S. drone rules from public FAA data. Click anywhere on the map to see
 
 ## Publish it on Posit Connect (password protected)
 
-The built map is already in this repository, so no download is needed to publish it.
+It is published as a **Streamlit** app: a password screen, then the map. Viewers pick states in the sidebar. The built map is already in this repository, so no download is needed to publish it.
 
 1. Install Python (see step 1 above).
 2. Double-click **`DEPLOY_TO_CONNECT.bat`** and answer three questions:
@@ -46,6 +46,16 @@ The built map is already in this repository, so no download is needed to publish
 3. In Connect, open **Drone Airspace Map**, go to **Settings > Access**, and choose **Anyone - no login required**. The password page protects it.
 
 To change the password later: Connect > the app > **Settings > Vars** > `MAP_PASSWORD`.
+
+On a Mac (Terminal, in this folder):
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install rsconnect-python
+.venv/bin/python deploy/build_site.py streamlit_app
+export MAP_PASSWORD='the password'
+.venv/bin/rsconnect deploy streamlit streamlit_app --entrypoint app.py --title "Drone Airspace Map" -E MAP_PASSWORD \n  --server https://YOUR-CONNECT-URL --api-key YOUR-API-KEY
+```
 To publish newer data: refresh it with `RUN_MAP.bat` (or pull the latest version of this repository), then run `DEPLOY_TO_CONNECT.bat` again.
 The Refresh buttons do not work on the hosted copy; the data age bar still shows how old it is.
 
@@ -65,6 +75,7 @@ python -m venv .venv
 
 | Task | Command |
 |---|---|
+| Try the Streamlit (hosted) version locally | `$env:MAP_PASSWORD='test'; .venv\Scripts\streamlit run streamlit_apppp.py` |
 | Open the map with working Refresh buttons | `.venv\Scripts\python serve_map.py` (serves the map at http://127.0.0.1:8765) |
 | Refresh only TFRs and stadium events (fast) | `.venv\Scripts\python build_uas_layers.py --out out_full --group fast`, then `make_v2_full.py` |
 | Add OpenStreetMap infrastructure (NY, KY, VA) | `.venv\Scripts\python osm_infra_pull.py` (add `--resume` if a step failed), then `make_v2_full.py` |

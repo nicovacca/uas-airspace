@@ -1,5 +1,5 @@
 @echo off
-rem Double-click to publish the map to Posit Connect behind a shared password.
+rem Double-click to publish the map to Posit Connect as a Streamlit app behind a shared password.
 rem Run RUN_MAP.bat first (it downloads the data and builds the map).
 cd /d "%~dp0"
 title Publish Drone Airspace Map to Posit Connect
@@ -19,7 +19,7 @@ if not exist ".venv\Scripts\python.exe" python -m venv .venv || goto :fail
 
 echo  [1/3] Getting the publishing tool ready...
 ".venv\Scripts\python" -m pip install --quiet --disable-pip-version-check rsconnect-python || goto :fail
-".venv\Scripts\python" deploy\build_site.py || goto :fail
+".venv\Scripts\python" deploy\build_site.py streamlit_app || goto :fail
 
 echo.
 echo  [2/3] Three questions. Nothing you type here is saved in any file.
@@ -33,13 +33,10 @@ set /p MAP_PASSWORD=  Password people will type to open the map :
 if not defined CONNECT_SERVER goto :missing
 if not defined CONNECT_API_KEY goto :missing
 if not defined MAP_PASSWORD goto :missing
-".venv\Scripts\python" -c "import secrets; print(secrets.token_hex(32))" > "%TEMP%\uas_sk.txt"
-set /p SECRET_KEY=<"%TEMP%\uas_sk.txt"
-del "%TEMP%\uas_sk.txt"
 
 echo.
 echo  [3/3] Uploading the map (about 100 MB, a few minutes)...
-".venv\Scripts\rsconnect" deploy flask deploy --entrypoint app:app --title "Drone Airspace Map" -E MAP_PASSWORD -E SECRET_KEY || goto :fail
+".venv\Scripts\rsconnect" deploy streamlit streamlit_app --entrypoint app.py --title "Drone Airspace Map" -E MAP_PASSWORD || goto :fail
 
 echo.
 echo  Published. Last step, in Posit Connect:
