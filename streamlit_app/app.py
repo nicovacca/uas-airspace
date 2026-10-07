@@ -23,8 +23,12 @@ SITE = HERE / "site" if (HERE / "site" / "index.html").exists() else HERE.parent
 st.set_page_config(page_title="Drone Airspace Map", page_icon="🛩️", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""<style>
   [data-testid="stToolbar"], footer { display:none; }
-  .block-container, [data-testid="stMainBlockContainer"] { padding:0 !important; max-width:100% !important; }
-  [data-testid="stMain"] iframe { display:block; border:0; }
+  /* map fills the window exactly, below Streamlit's 3.75rem header */
+  .block-container, [data-testid="stMainBlockContainer"] { padding:3.75rem 0 0 0 !important; max-width:100% !important; }
+  [data-testid="stMain"] iframe, [data-testid="stIFrame"] { display:block; border:0; height:calc(100vh - 3.75rem) !important; }
+  [data-testid="stMain"] [data-testid="stVerticalBlock"] { gap:0 !important; }
+  [data-testid="stMain"] [data-testid="stElementContainer"]:has(iframe) { height:auto !important; }
+  [data-testid="stMain"] { overflow:hidden; }
 </style>""", unsafe_allow_html=True)
 
 
@@ -85,7 +89,6 @@ with st.sidebar:
     st.caption(f"{len(picked)} state(s), about {size:.0f} MB")
     if size > 40:
         st.warning("That's a lot of data; the map may be slow. Pick fewer states for speed.")
-    height = st.slider("Map height (px)", 600, 1400, 860, 20)
     if st.button("Log out", use_container_width=True):
         st.session_state.clear()
         st.rerun()
@@ -106,4 +109,4 @@ head = ("<script>"
         + "".join(f"<script>{state_js(c, mtime)}</script>\n" for c in codes))
 html = (SITE / "index.html").read_text(encoding="utf-8").replace('<script src="data/states.js"></script>', head, 1)
 with st.spinner("Loading map..."):
-    st.iframe(html, height=height)
+    st.iframe(html, height=800)          # CSS above stretches it to the window
